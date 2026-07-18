@@ -30,6 +30,16 @@ Gotchas discovered during implementation. Append after each task, then compact
 - Postgres swap really is conn-string-only: SQLAlchemy JSON columns and all
   sync/label logic ran unmodified on `postgresql+psycopg://`.
 
+## Web/UI
+
+- Flexbox: `#cy { flex:1 }` beside a fixed-width panel needs `min-width: 0` on
+  the canvas container and `flex-shrink: 0` on the panel — cytoscape's canvas
+  sets content width, and `min-width:auto` otherwise crushes the panel to a
+  sliver. Call `cy.resize()` after any container size change (panel open/close).
+- UI smoke-testable headless without installing browsers: playwright pip pkg +
+  `executable_path` to system Chrome; expose `window.cy` and drive canvas nodes
+  via `cy.$(...).emit('tap')` (canvas graph has no DOM elements to click).
+
 ## Environment
 
 - colima VM can leave stale disk lock after crash ("in use by instance");
