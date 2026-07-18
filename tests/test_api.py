@@ -43,3 +43,30 @@ def test_index_served(tmp_path):
     r = _client(tmp_path).get("/")
     assert r.status_code == 200
     assert "cytoscape" in r.text
+
+
+def test_labels_crud(tmp_path):
+    client = _client(tmp_path)
+    assert client.put("/labels/c1/app/events", json={"key": "source", "value": "vector"}).status_code == 200
+    assert client.get("/entities/c1/app/events").json()["labels"] == {"source": "vector"}
+    node = next(n for n in client.get("/graph").json()["nodes"] if n["name"] == "events")
+    assert node["labels"] == {"source": "vector"}
+    assert client.delete("/labels/c1/app/events/source").status_code == 200
+    assert client.delete("/labels/c1/app/events/source").status_code == 404
+    assert client.get("/entities/c1/app/events").json()["labels"] == {}
+
+
+def test_sync_endpoint(tmp_path, monkeypatch):
+    import app.api as api_mod
+
+    monkeypatch.setattr(api_mod, "run_sync", lambda cfg, only_cluster=None: {"local": {"created": 1}})
+    client = _client(tmp_path)
+    assert client.post("/sync").json() == {"local": {"created": 1}}
+
+    monkeypatch.setattr(api_mod, "run_sync", lambda cfg, only_cluster=None: {})
+    assert client.post("/sync?cluster=nope").status_code == 404
+
+    def boom(cfg, only_cluster=None):
+        raise ConnectionError("cluster down")
+    monkeypatch.setattr(api_mod, "run_sync", boom)
+    assert client.post("/sync").status_code == 502

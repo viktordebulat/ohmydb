@@ -55,9 +55,25 @@
     padding: 5px 10px; border: 1px solid var(--grid); border-radius: 6px;
     background: var(--page); color: var(--ink); width: 220px; font: inherit;
   }
-  #cluster-filter {
+  #cluster-filter, #label-filter {
     padding: 5px 8px; border: 1px solid var(--grid); border-radius: 6px;
-    background: var(--page); color: var(--ink); font: inherit; display: none;
+    background: var(--page); color: var(--ink); font: inherit;
+  }
+  #cluster-filter { display: none; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px; margin: 0 6px 6px 0;
+    padding: 2px 8px; border: 1px solid var(--border); border-radius: 10px;
+    font-size: 11px; color: var(--ink-2); background: var(--page);
+  }
+  .chip button { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0; font-size: 13px; }
+  #label-add { display: flex; gap: 6px; margin: 4px 0 12px; }
+  #label-add input {
+    flex: 1; padding: 4px 8px; border: 1px solid var(--grid); border-radius: 6px;
+    background: var(--page); color: var(--ink); font: inherit; font-size: 12px;
+  }
+  #label-add button {
+    padding: 4px 10px; border: 1px solid var(--grid); border-radius: 6px;
+    background: var(--page); color: var(--ink); cursor: pointer; font-size: 12px;
   }
   .legend { display: flex; gap: 12px; margin-left: auto; font-size: 12px; color: var(--ink-2); }
   .legend span { display: inline-flex; align-items: center; gap: 5px; }
@@ -97,6 +113,7 @@
   <span class="sub" id="synced">–</span>
   <input id="search" type="search" placeholder="filter tables…">
   <select id="cluster-filter"></select>
+  <select id="label-filter"></select>
   <div class="legend" id="legend"></div>
 </header>
 <main>
@@ -107,6 +124,11 @@
     <h2 id="p-name"></h2>
     <div class="meta" id="p-meta"></div>
     <div id="p-badges"></div>
+    <div id="p-labels" style="margin-top:10px"></div>
+    <div id="label-add">
+      <input id="label-input" placeholder="key=value">
+      <button id="label-add-btn">add</button>
+    </div>
     <table id="p-columns"></table>
     <pre id="p-ddl"></pre>
   </aside>
@@ -191,8 +213,10 @@ async function load() {
   });
 
   const panel = document.getElementById("panel");
+  let currentNode = null;
   cy.on("tap", "node", async (ev) => {
     const n = ev.target;
+    currentNode = n;
     const hood = n.closedNeighborhood();
     cy.elements().addClass("faded");
     hood.removeClass("faded");
@@ -232,21 +256,76 @@ async function load() {
            <td class="type">${c.type}</td></tr>`).join("")
       : "";
     document.getElementById("p-ddl").textContent = detail?.ddl || "(not introspected — external reference)";
+    renderLabels(d);
+  }
+
+  function renderLabels(d) {
+    const labels = d.labels || {};
+    document.getElementById("p-labels").innerHTML = Object.entries(labels)
+      .map(([k, v]) =>
+        `<span class="chip">${k}=${v}<button data-key="${k}" title="remove">×</button></span>`)
+      .join("");
+    document.querySelectorAll("#p-labels .chip button").forEach((b) => {
+      b.onclick = async () => {
+        await fetch(`/labels/${d.cluster}/${d.database}/${d.name}/${encodeURIComponent(b.dataset.key)}`,
+          { method: "DELETE" });
+        delete labels[b.dataset.key];
+        currentNode?.data("labels", labels);
+        renderLabels(d);
+        refreshLabelOptions();
+      };
+    });
+  }
+
+  document.getElementById("label-add-btn").onclick = async () => {
+    if (!currentNode) return;
+    const input = document.getElementById("label-input");
+    const [key, ...rest] = input.value.split("=");
+    if (!key.trim()) return;
+    const d = currentNode.data();
+    const value = rest.join("=").trim();
+    await fetch(`/labels/${d.cluster}/${d.database}/${d.name}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: key.trim(), value }),
+    });
+    const labels = { ...(d.labels || {}), [key.trim()]: value };
+    currentNode.data("labels", labels);
+    input.value = "";
+    renderLabels({ ...d, labels });
+    refreshLabelOptions();
+  };
+
+  const labelSel = document.getElementById("label-filter");
+  function refreshLabelOptions() {
+    const current = labelSel.value;
+    const pairs = new Set();
+    cy.nodes().forEach((n) =>
+      Object.entries(n.data("labels") || {}).forEach(([k, v]) => pairs.add(k + "=" + v)));
+    labelSel.innerHTML = '<option value="">all labels</option>' +
+      [...pairs].sort().map((p) => `<option${p === current ? " selected" : ""}>${p}</option>`).join("");
   }
 
   function applyFilters() {
     const q = document.getElementById("search").value.trim().toLowerCase();
     const cl = sel.value;
+    const lf = labelSel.value;
     cy.batch(() => {
       cy.nodes().forEach((n) => {
+        const labels = n.data("labels") || {};
+        const labelText = Object.entries(labels).map(([k, v]) => k + "=" + v);
         const hit = (!cl || n.data("cluster") === cl) &&
-          (!q || n.data("label").toLowerCase().includes(q));
+          (!lf || labelText.includes(lf)) &&
+          (!q || n.data("label").toLowerCase().includes(q) ||
+            labelText.some((t) => t.toLowerCase().includes(q)));
         n.style("display", hit ? "element" : "none");
       });
     });
   }
   document.getElementById("search").addEventListener("input", applyFilters);
   sel.addEventListener("change", applyFilters);
+  labelSel.addEventListener("change", applyFilters);
+  refreshLabelOptions();
 }
 load();
 </script>

@@ -1,16 +1,24 @@
-"""FastAPI app: graph + entity detail JSON, static visualization page."""
+"""FastAPI app: graph + entity detail JSON, labels CRUD, sync trigger,
+static visualization page."""
 
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from pydantic import BaseModel
 
 from app.config import AppConfig
-from app.store.db import EdgeRow, EntityRow, make_session_factory
+from app.core.sync import run_sync
+from app.store.db import make_session_factory
+from app.store.queries import delete_label, get_entity, graph_payload, set_label
 
 WEB_DIR = Path(__file__).parent / "web"
+
+
+class LabelBody(BaseModel):
+    key: str
+    value: str = ""
 
 
 def create_app(cfg: AppConfig) -> FastAPI:
@@ -20,48 +28,38 @@ def create_app(cfg: AppConfig) -> FastAPI:
     @app.get("/graph")
     def graph() -> dict:
         with factory() as s:
-            entities = s.scalars(select(EntityRow)).all()
-            edges = s.scalars(select(EdgeRow)).all()
-        return {
-            "nodes": [
-                {
-                    "id": e.id,
-                    "cluster": e.cluster,
-                    "database": e.database,
-                    "name": e.name,
-                    "kind": e.kind,
-                    "engine": e.engine,
-                    "refreshable": bool((e.attrs or {}).get("refreshable")),
-                    "synced_at": e.synced_at.isoformat() if e.synced_at else None,
-                }
-                for e in entities
-            ],
-            "edges": [{"src": e.src_id, "dst": e.dst_id, "kind": e.kind} for e in edges],
-        }
+            return graph_payload(s)
 
     @app.get("/entities/{cluster}/{database}/{name}")
     def entity(cluster: str, database: str, name: str) -> dict:
         with factory() as s:
-            row = s.scalar(
-                select(EntityRow).where(
-                    EntityRow.cluster == cluster,
-                    EntityRow.database == database,
-                    EntityRow.name == name,
-                )
-            )
-        if row is None:
+            payload = get_entity(s, cluster, database, name)
+        if payload is None:
             raise HTTPException(status_code=404, detail="entity not found")
-        return {
-            "cluster": row.cluster,
-            "database": row.database,
-            "name": row.name,
-            "kind": row.kind,
-            "engine": row.engine,
-            "ddl": row.ddl,
-            "columns": row.columns,
-            "attrs": row.attrs,
-            "synced_at": row.synced_at.isoformat() if row.synced_at else None,
-        }
+        return payload
+
+    @app.put("/labels/{cluster}/{database}/{table}")
+    def put_label(cluster: str, database: str, table: str, body: LabelBody) -> dict:
+        with factory() as s:
+            set_label(s, cluster, database, table, body.key, body.value)
+        return {"ok": True}
+
+    @app.delete("/labels/{cluster}/{database}/{table}/{key}")
+    def remove_label(cluster: str, database: str, table: str, key: str) -> dict:
+        with factory() as s:
+            if not delete_label(s, cluster, database, table, key):
+                raise HTTPException(status_code=404, detail="label not found")
+        return {"ok": True}
+
+    @app.post("/sync")
+    def sync(cluster: str | None = None) -> dict:
+        try:
+            results = run_sync(cfg, only_cluster=cluster)
+        except Exception as e:  # introspection failed (cluster down, auth, ...)
+            raise HTTPException(status_code=502, detail=str(e))
+        if not results:
+            raise HTTPException(status_code=404, detail=f"no cluster matched {cluster!r}")
+        return results
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:

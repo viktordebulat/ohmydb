@@ -23,6 +23,13 @@ Gotchas discovered during implementation. Append after each task, then compact
   every `up`, so seed SQL must stay idempotent (`IF NOT EXISTS` everywhere).
   `docker compose up --wait` accepts one-shot containers exiting 0.
 
+## Stack
+
+- fastmcp tools are testable without a transport: `async with Client(mcp_instance)`
+  runs in-memory; wrap in `asyncio.run()` — no pytest-asyncio needed.
+- Postgres swap really is conn-string-only: SQLAlchemy JSON columns and all
+  sync/label logic ran unmodified on `postgresql+psycopg://`.
+
 ## Environment
 
 - colima VM can leave stale disk lock after crash ("in use by instance");

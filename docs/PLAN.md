@@ -58,7 +58,12 @@ edge endpoints → insert edges. Labels untouched. `synced_at` = staleness signa
   Cytoscape/dagre page (`ohmydb serve`). Node color+shape by kind, dashed border
   = refreshable, edges rendered in data-flow direction, click → columns+DDL
   panel, search + cluster filter, light/dark. Verified via API tests + curl.
-- **M3 (post-MVP)**: labels CRUD + UI filter, POST /sync for CI, fastmcp wrapper, Postgres in compose.
+- **M3 — DONE (2026-07-18)**: labels CRUD (`PUT /labels/{cluster}/{db}/{table}`
+  body `{key, value}`, `DELETE /labels/.../{key}`), labels in graph/entity
+  payloads + panel editor + label filter in UI, `POST /sync[?cluster=]` for CI
+  (502 when introspection fails), `ohmydb mcp` fastmcp stdio server (tools:
+  `get_schema_graph`, `get_table`, `find_tables`), Postgres via compose profile
+  `postgres` — verified sync+labels against it, swap is conn-string-only.
 
 ## Fetch format
 
