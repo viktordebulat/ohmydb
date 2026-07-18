@@ -1,0 +1,25 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.5
+    ports:
+      - "8123:8123"
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ohmydb
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--password", "ohmydb", "--query", "SELECT 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  clickhouse-init:
+    image: clickhouse/clickhouse-server:25.5
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    volumes:
+      - ./seed:/seed:ro
+    entrypoint: >
+      clickhouse-client --host clickhouse --password ohmydb
+      --queries-file /seed/01_schema.sql
+    restart: "no"
