@@ -54,7 +54,10 @@ edge endpoints → insert edges. Labels untouched. `synced_at` = staleness signa
   docker-compose + seed schema, tests (15). Verified: `ohmydb sync` against
   dockerized seeded ClickHouse → 7 entities (all kinds), 5 edges (all kinds),
   idempotent re-sync.
-- **M2**: FastAPI `/graph` + `/entities/{...}` + static Cytoscape page.
+- **M2 — DONE (2026-07-18)**: FastAPI `/graph` + `/entities/{...}` + static
+  Cytoscape/dagre page (`ohmydb serve`). Node color+shape by kind, dashed border
+  = refreshable, edges rendered in data-flow direction, click → columns+DDL
+  panel, search + cluster filter, light/dark. Verified via API tests + curl.
 - **M3 (post-MVP)**: labels CRUD + UI filter, POST /sync for CI, fastmcp wrapper, Postgres in compose.
 
 ## Fetch format

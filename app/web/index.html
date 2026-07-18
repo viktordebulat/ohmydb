@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oh-my-db — schema graph</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --page: #f9f9f7;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --border: rgba(11, 11, 11, 0.10);
+    --kind-table: #2a78d6;
+    --kind-mat_view: #008300;
+    --kind-view: #e87ba4;
+    --kind-dictionary: #eda100;
+    --kind-external: #898781;
+    --edge: #c3c2b7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface: #1a1a19;
+      --page: #0d0d0d;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --border: rgba(255, 255, 255, 0.10);
+      --kind-table: #3987e5;
+      --kind-mat_view: #008300;
+      --kind-view: #d55181;
+      --kind-dictionary: #c98500;
+      --kind-external: #898781;
+      --edge: #383835;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: flex; flex-direction: column;
+    background: var(--page); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 10px 16px; border-bottom: 1px solid var(--grid); background: var(--surface);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 650; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  #search {
+    padding: 5px 10px; border: 1px solid var(--grid); border-radius: 6px;
+    background: var(--page); color: var(--ink); width: 220px; font: inherit;
+  }
+  #cluster-filter {
+    padding: 5px 8px; border: 1px solid var(--grid); border-radius: 6px;
+    background: var(--page); color: var(--ink); font: inherit; display: none;
+  }
+  .legend { display: flex; gap: 12px; margin-left: auto; font-size: 12px; color: var(--ink-2); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #cy { flex: 1; background: var(--surface); }
+  #panel {
+    width: 380px; border-left: 1px solid var(--grid); background: var(--surface);
+    overflow-y: auto; padding: 14px 16px; display: none;
+  }
+  #panel.open { display: block; }
+  #panel h2 { font-size: 14px; margin: 0 0 2px; word-break: break-all; }
+  #panel .meta { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+  #panel .badge {
+    display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 11px;
+    color: var(--ink); border: 1px solid var(--border); margin-right: 6px;
+  }
+  #panel table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 8px 0 14px; }
+  #panel th { text-align: left; color: var(--muted); font-weight: 500; padding: 3px 6px 3px 0; }
+  #panel td { padding: 3px 6px 3px 0; border-top: 1px solid var(--grid); vertical-align: top; }
+  #panel td.type { color: var(--ink-2); font-family: ui-monospace, monospace; font-size: 11px; }
+  #panel pre {
+    background: var(--page); border: 1px solid var(--grid); border-radius: 6px;
+    padding: 10px; font-size: 11px; white-space: pre-wrap; word-break: break-word;
+    max-height: 40vh; overflow: auto;
+  }
+  #panel .close { float: right; cursor: pointer; color: var(--muted); border: 0; background: none; font-size: 16px; }
+  #empty {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); pointer-events: none; visibility: hidden;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>oh-my-db</h1>
+  <span class="sub" id="synced">–</span>
+  <input id="search" type="search" placeholder="filter tables…">
+  <select id="cluster-filter"></select>
+  <div class="legend" id="legend"></div>
+</header>
+<main>
+  <div id="cy"></div>
+  <div id="empty">no entities — run <code>&nbsp;ohmydb sync</code></div>
+  <aside id="panel">
+    <button class="close" id="panel-close" title="close">×</button>
+    <h2 id="p-name"></h2>
+    <div class="meta" id="p-meta"></div>
+    <div id="p-badges"></div>
+    <table id="p-columns"></table>
+    <pre id="p-ddl"></pre>
+  </aside>
+</main>
+<script src="/vendor/cytoscape.min.js"></script>
+<script src="/vendor/dagre.min.js"></script>
+<script src="/vendor/cytoscape-dagre.js"></script>
+<script>
+const KINDS = {
+  table:      { label: "table",       shape: "round-rectangle" },
+  mat_view:   { label: "mat view",    shape: "diamond" },
+  view:       { label: "view",        shape: "ellipse" },
+  dictionary: { label: "dictionary",  shape: "hexagon" },
+  external:   { label: "external",    shape: "round-rectangle" },
+};
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const kindColor = (kind) => css("--kind-" + kind) || css("--kind-external");
+
+// Edges are stored as dependency direction; render as data-flow direction.
+function flowEdge(e) {
+  if (e.kind === "writes_to") return { source: e.src, target: e.dst };
+  return { source: e.dst, target: e.src }; // reads_from, dict_source
+}
+
+async function load() {
+  const g = await (await fetch("/graph")).json();
+  const clusters = [...new Set(g.nodes.map((n) => n.cluster))];
+
+  const sel = document.getElementById("cluster-filter");
+  if (clusters.length > 1) {
+    sel.style.display = "inline-block";
+    sel.innerHTML = '<option value="">all clusters</option>' +
+      clusters.map((c) => `<option>${c}</option>`).join("");
+  }
+
+  const legend = document.getElementById("legend");
+  legend.innerHTML = Object.entries(KINDS)
+    .map(([k, v]) => `<span><i class="dot" style="background:${kindColor(k)}"></i>${v.label}</span>`)
+    .join("");
+
+  const synced = g.nodes.map((n) => n.synced_at).filter(Boolean).sort().at(-1);
+  document.getElementById("synced").textContent =
+    synced ? "synced " + new Date(synced).toLocaleString() : "never synced";
+  document.getElementById("empty").style.visibility = g.nodes.length ? "hidden" : "visible";
+
+  const elements = [
+    ...g.nodes.map((n) => ({ data: { ...n, id: String(n.id), label: n.database + "." + n.name } })),
+    ...g.edges.map((e, i) => {
+      const { source, target } = flowEdge(e);
+      return { data: { id: "e" + i, source: String(source), target: String(target), kind: e.kind } };
+    }),
+  ];
+
+  const cy = cytoscape({
+    container: document.getElementById("cy"),
+    elements,
+    layout: { name: "dagre", rankDir: "LR", nodeSep: 24, rankSep: 90 },
+    wheelSensitivity: 0.2,
+    style: [
+      { selector: "node", style: {
+          shape: (n) => (KINDS[n.data("kind")] || KINDS.external).shape,
+          "background-color": (n) => kindColor(n.data("kind")),
+          "background-opacity": (n) => (n.data("kind") === "external" ? 0.35 : 1),
+          width: "label", height: 26, padding: "8px",
+          label: "data(label)",
+          color: css("--ink"),
+          "font-size": 11,
+          "text-valign": "bottom", "text-margin-y": 5,
+          "border-width": (n) => (n.data("refreshable") ? 2 : 1),
+          "border-style": (n) => (n.data("refreshable") ? "dashed" : "solid"),
+          "border-color": css("--muted"),
+      }},
+      { selector: "edge", style: {
+          width: 2, "curve-style": "bezier",
+          "line-color": css("--edge"), "target-arrow-color": css("--edge"),
+          "target-arrow-shape": "triangle", "arrow-scale": 1,
+          "line-style": (e) => (e.data("kind") === "dict_source" ? "dashed" : "solid"),
+      }},
+      { selector: ".faded", style: { opacity: 0.15, events: "no" } },
+      { selector: "node:selected", style: { "border-width": 3, "border-color": css("--ink") } },
+    ],
+  });
+
+  const panel = document.getElementById("panel");
+  cy.on("tap", "node", async (ev) => {
+    const n = ev.target;
+    const hood = n.closedNeighborhood();
+    cy.elements().addClass("faded");
+    hood.removeClass("faded");
+    const d = n.data();
+    if (d.kind === "external") {
+      showPanel(d, null);
+      return;
+    }
+    const r = await fetch(`/entities/${d.cluster}/${d.database}/${d.name}`);
+    showPanel(d, r.ok ? await r.json() : null);
+  });
+  cy.on("tap", (ev) => {
+    if (ev.target === cy) {
+      cy.elements().removeClass("faded");
+      panel.classList.remove("open");
+    }
+  });
+  document.getElementById("panel-close").onclick = () => {
+    cy.elements().removeClass("faded");
+    panel.classList.remove("open");
+  };
+
+  function showPanel(d, detail) {
+    panel.classList.add("open");
+    document.getElementById("p-name").textContent = d.database + "." + d.name;
+    document.getElementById("p-meta").textContent =
+      d.cluster + (detail?.synced_at ? " · synced " + new Date(detail.synced_at).toLocaleString() : "");
+    const badges = [`<span class="badge" style="border-color:${kindColor(d.kind)}">${(KINDS[d.kind] || KINDS.external).label}</span>`];
+    if (d.engine) badges.push(`<span class="badge">${d.engine}</span>`);
+    if (d.refreshable) badges.push('<span class="badge">refreshable</span>');
+    document.getElementById("p-badges").innerHTML = badges.join("");
+    const cols = detail?.columns || [];
+    document.getElementById("p-columns").innerHTML = cols.length
+      ? "<tr><th>column</th><th>type</th></tr>" +
+        cols.map((c) =>
+          `<tr><td>${c.name}${c.comment ? `<div style="color:var(--muted);font-size:11px">${c.comment}</div>` : ""}</td>
+           <td class="type">${c.type}</td></tr>`).join("")
+      : "";
+    document.getElementById("p-ddl").textContent = detail?.ddl || "(not introspected — external reference)";
+  }
+
+  function applyFilters() {
+    const q = document.getElementById("search").value.trim().toLowerCase();
+    const cl = sel.value;
+    cy.batch(() => {
+      cy.nodes().forEach((n) => {
+        const hit = (!cl || n.data("cluster") === cl) &&
+          (!q || n.data("label").toLowerCase().includes(q));
+        n.style("display", hit ? "element" : "none");
+      });
+    });
+  }
+  document.getElementById("search").addEventListener("input", applyFilters);
+  sel.addEventListener("change", applyFilters);
+}
+load();
+</script>
+</body>
+</html>
