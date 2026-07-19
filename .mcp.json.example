@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ohmydb": {
+      "command": "uv",
+      "args": ["run", "ohmydb", "mcp"]
+    }
+  }
+}

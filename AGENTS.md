@@ -35,6 +35,7 @@ Layout: `pyproject.toml`, `.venv`, `tests/` in repo root; all app code in `app/`
 - `app/store/queries.py` — shared read/label helpers used by API and MCP.
 - `app/api.py` — FastAPI: `/graph`, `/entities/{cluster}/{db}/{name}` (+`/relations`), labels, `/sync`.
 - `config.yaml` — clusters + storage url.
+- `.mcp.json.example` — MCP registration for AI coding agents: `cp .mcp.json.example .mcp.json` (`.mcp.json` itself is gitignored); works as-is from repo root, add `--project <path>` to `args` when registering globally.
 - `docker-compose.yaml` + `seed/` — local ClickHouse with sample schema for testing.
 
 ## Commands
