@@ -1,0 +1,11 @@
+storage:
+  url: sqlite:///ohmydb.sqlite
+
+clusters:
+  - name: local
+    type: clickhouse
+    host: localhost
+    port: 8123
+    username: default
+    password: "ohmydb"
+    databases: []  # empty = all non-system databases
