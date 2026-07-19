@@ -22,7 +22,7 @@ class LabelBody(BaseModel):
 
 def create_app(cfg: AppConfig) -> FastAPI:
     factory = make_session_factory(cfg.storage_url)
-    app = FastAPI(title="oh-my-db")
+    app = FastAPI(title="ohmydb")
 
     @app.get("/graph")
     def graph() -> dict:
@@ -65,7 +65,9 @@ def create_app(cfg: AppConfig) -> FastAPI:
         except Exception as e:  # introspection failed (cluster down, auth, ...)
             raise HTTPException(status_code=502, detail=str(e))
         if not results:
-            raise HTTPException(status_code=404, detail=f"no cluster matched {cluster!r}")
+            raise HTTPException(
+                status_code=404, detail=f"no cluster matched {cluster!r}"
+            )
         return results
 
     return app

@@ -9,7 +9,7 @@ from app.store.queries import get_entity, get_relations, graph_payload
 
 def create_mcp(cfg: AppConfig) -> FastMCP:
     factory = make_session_factory(cfg.storage_url)
-    mcp = FastMCP("oh-my-db")
+    mcp = FastMCP("ohmydb")
 
     @mcp.tool
     def get_schema_graph() -> dict:
@@ -50,7 +50,8 @@ def create_mcp(cfg: AppConfig) -> FastMCP:
         return [
             {k: n[k] for k in ("cluster", "database", "name", "kind", "labels")}
             for n in nodes
-            if q in n["name"].lower() or q in n["database"].lower()
+            if q in n["name"].lower()
+            or q in n["database"].lower()
             or any(q in v.lower() or q in k.lower() for k, v in n["labels"].items())
         ]
 

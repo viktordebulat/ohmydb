@@ -16,7 +16,7 @@ def main() -> None:
     serve_p = sub.add_parser("serve", help="serve HTTP API")
     serve_p.add_argument("--config", default="config.yaml")
     serve_p.add_argument("--host", default="127.0.0.1")
-    serve_p.add_argument("--port", type=int, default=8000)
+    serve_p.add_argument("--port", type=int, default=8080)
     mcp_p = sub.add_parser("mcp", help="run MCP server for AI agents (stdio)")
     mcp_p.add_argument("--config", default="config.yaml")
     args = parser.parse_args()

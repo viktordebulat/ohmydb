@@ -5,5 +5,11 @@ __pycache__/
 .pytest_cache/
 uv.lock
 
+.env
+.env/
+.venv/
+venv/
+.envrc
+
 .claude/*
 !.claude/skills/*
