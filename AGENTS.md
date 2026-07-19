@@ -40,11 +40,14 @@ Layout: `pyproject.toml`, `.venv`, `tests/` in repo root; all app code in `app/`
 ## Commands
 
 ```bash
-uv sync                       # install deps
-docker compose up -d          # local ClickHouse (seeded)
-uv run ohmydb sync            # introspect → SQLite
-uv run ohmydb serve           # HTTP API at http://127.0.0.1:8000
-uv run ohmydb mcp             # MCP server (stdio) for AI agents
-docker compose --profile postgres up -d   # optional Postgres backend
-uv run pytest                 # unit tests; integration tests auto-skip without ClickHouse
+task up      # full local stack: seeded ClickHouse + sync + API on :8000
+task serve   # service only, no ClickHouse (existing catalog sqlite)
+task sync    # re-introspect clusters
+task mcp     # MCP server (stdio) for AI agents
+task test    # tests; integration auto-skips without ClickHouse
+task down    # stop containers   (task clean: also drop volumes + catalog)
 ```
+
+Raw commands behind the tasks: `uv sync`, `docker compose up -d --wait clickhouse`,
+`docker compose run --rm clickhouse-init`, `uv run ohmydb sync|serve|mcp`,
+`uv run pytest`. Optional Postgres: `docker compose --profile postgres up -d`.

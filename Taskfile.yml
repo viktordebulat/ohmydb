@@ -1,0 +1,50 @@
+version: "3"
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  up:
+    desc: "Full local stack: seeded ClickHouse + sync + API"
+    cmds:
+      - uv sync
+      # --wait only on clickhouse: it fails on the one-shot init container
+      # even when it exits 0; seeding runs synchronously instead
+      - docker compose up -d --wait clickhouse
+      - docker compose run --rm clickhouse-init
+      - uv run ohmydb sync
+      - uv run ohmydb serve
+
+  serve:
+    desc: "Service only: API against existing catalog (no ClickHouse)"
+    cmds:
+      - uv sync
+      - uv run ohmydb serve
+
+  sync:
+    desc: "Introspect clusters into the catalog"
+    cmds:
+      - uv run ohmydb sync
+
+  mcp:
+    desc: "MCP server (stdio) for AI agents"
+    cmds:
+      - uv run ohmydb mcp
+
+  test:
+    desc: "Run tests (integration auto-skips without ClickHouse)"
+    cmds:
+      - uv run pytest
+
+  down:
+    desc: "Stop containers"
+    cmds:
+      - docker compose --profile postgres down
+
+  clean:
+    desc: "Stop containers, drop volumes and local catalog"
+    cmds:
+      - docker compose --profile postgres down -v
+      - rm -f ohmydb.sqlite

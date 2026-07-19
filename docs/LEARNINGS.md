@@ -21,7 +21,10 @@ Gotchas discovered during implementation. Append after each task, then compact
   instead uses a one-shot `clickhouse-init` compose service running
   `clickhouse-client --queries-file` (multiquery) after healthcheck — runs on
   every `up`, so seed SQL must stay idempotent (`IF NOT EXISTS` everywhere).
-  `docker compose up --wait` accepts one-shot containers exiting 0.
+- `docker compose up -d --wait` FAILS (exit 1) when a one-shot service exits,
+  even with code 0 — and a trailing `| tail` masks the exit code, which hid
+  this for a while. Wait only on long-running services
+  (`up -d --wait clickhouse`) and run one-shots via `compose run --rm`.
 
 ## Stack
 
