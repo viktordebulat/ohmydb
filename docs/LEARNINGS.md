@@ -30,15 +30,14 @@ Gotchas discovered during implementation. Append after each task, then compact
 - Postgres swap really is conn-string-only: SQLAlchemy JSON columns and all
   sync/label logic ran unmodified on `postgresql+psycopg://`.
 
-## Web/UI
+## Web/UI (removed 2026-07-19, notes kept for future FE work)
 
-- Flexbox: `#cy { flex:1 }` beside a fixed-width panel needs `min-width: 0` on
-  the canvas container and `flex-shrink: 0` on the panel — cytoscape's canvas
-  sets content width, and `min-width:auto` otherwise crushes the panel to a
-  sliver. Call `cy.resize()` after any container size change (panel open/close).
-- UI smoke-testable headless without installing browsers: playwright pip pkg +
-  `executable_path` to system Chrome; expose `window.cy` and drive canvas nodes
-  via `cy.$(...).emit('tap')` (canvas graph has no DOM elements to click).
+- Headless UI smoke-testing without installing browsers: playwright pip pkg +
+  `executable_path` to system Chrome. For canvas graphs (cytoscape) expose the
+  instance on `window` and drive nodes via `.emit('tap')` — no DOM to click.
+- First Cytoscape+dagre attempt judged not user-facing ready: chaotic node
+  placement, unreadable on big schemas. Next attempt needs real layout research
+  (ELK? grouping by database? collapsing?), not just a dagre default.
 
 ## Environment
 

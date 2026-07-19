@@ -44,4 +44,9 @@ def test_mcp_tools(tmp_path):
             found = _payload(await c.call_tool("find_tables", {"query": "vector"}))
             assert [f["name"] for f in found] == ["events"]
 
+            rel = _payload(await c.call_tool(
+                "get_table_relations", {"cluster": "c1", "database": "app", "name": "events"}))
+            assert rel["entity"]["name"] == "events"
+            assert rel["upstream"] == [] and rel["downstream"] == []
+
     asyncio.run(go())

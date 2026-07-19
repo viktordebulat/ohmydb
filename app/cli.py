@@ -13,7 +13,7 @@ def main() -> None:
     sync_p = sub.add_parser("sync", help="introspect clusters and refresh stored state")
     sync_p.add_argument("--config", default="config.yaml")
     sync_p.add_argument("--cluster", default=None, help="sync only this cluster")
-    serve_p = sub.add_parser("serve", help="serve visualization + API")
+    serve_p = sub.add_parser("serve", help="serve HTTP API")
     serve_p.add_argument("--config", default="config.yaml")
     serve_p.add_argument("--host", default="127.0.0.1")
     serve_p.add_argument("--port", type=int, default=8000)

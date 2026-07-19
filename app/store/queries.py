@@ -65,6 +65,76 @@ def get_entity(session: Session, cluster: str, database: str, name: str) -> dict
     }
 
 
+def get_relations(session: Session, cluster: str, database: str, name: str) -> dict | None:
+    """All entities related to one entity: transitive upstream (data sources)
+    and downstream (consumers), plus the dependency edges among them.
+
+    Stored edges are dependency-direction; here they are walked in data-flow
+    direction: writes_to flows src→dst, reads_from/dict_source flow dst→src.
+    """
+    target = session.scalar(
+        select(EntityRow).where(
+            EntityRow.cluster == cluster,
+            EntityRow.database == database,
+            EntityRow.name == name,
+        )
+    )
+    if target is None:
+        return None
+
+    entities = session.scalars(select(EntityRow)).all()
+    edges = session.scalars(select(EdgeRow)).all()
+    by_id = {r.id: r for r in entities}
+
+    flow_out: dict[int, set[int]] = {}  # data flows from key to values
+    flow_in: dict[int, set[int]] = {}
+    for e in edges:
+        frm, to = (e.src_id, e.dst_id) if e.kind == "writes_to" else (e.dst_id, e.src_id)
+        flow_out.setdefault(frm, set()).add(to)
+        flow_in.setdefault(to, set()).add(frm)
+
+    def reachable(adj: dict[int, set[int]], start: int) -> set[int]:
+        seen: set[int] = set()
+        stack = [start]
+        while stack:
+            for nxt in adj.get(stack.pop(), ()):
+                if nxt != start and nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        return seen
+
+    upstream = reachable(flow_in, target.id)
+    downstream = reachable(flow_out, target.id)
+    keep = upstream | downstream | {target.id}
+
+    labels = _labels_for(session, [by_id[i] for i in keep])
+
+    def brief(r: EntityRow) -> dict:
+        return {
+            "cluster": r.cluster,
+            "database": r.database,
+            "name": r.name,
+            "kind": r.kind,
+            "engine": r.engine,
+            "labels": labels.get((r.cluster, r.database, r.name), {}),
+        }
+
+    def ident(r: EntityRow) -> str:
+        return f"{r.cluster}/{r.database}/{r.name}"
+
+    order = lambda i: (by_id[i].cluster, by_id[i].database, by_id[i].name)  # noqa: E731
+    return {
+        "entity": brief(target),
+        "upstream": [brief(by_id[i]) for i in sorted(upstream, key=order)],
+        "downstream": [brief(by_id[i]) for i in sorted(downstream, key=order)],
+        "edges": [
+            {"src": ident(by_id[e.src_id]), "dst": ident(by_id[e.dst_id]), "kind": e.kind}
+            for e in edges
+            if e.src_id in keep and e.dst_id in keep
+        ],
+    }
+
+
 def set_label(session: Session, cluster: str, database: str, table: str, key: str, value: str) -> None:
     row = session.scalar(
         select(LabelRow).where(

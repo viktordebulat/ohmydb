@@ -39,10 +39,16 @@ def test_entity_detail_and_404(tmp_path):
     assert client.get("/entities/c1/app/nope").status_code == 404
 
 
-def test_index_served(tmp_path):
-    r = _client(tmp_path).get("/")
+def test_relations(tmp_path):
+    client = _client(tmp_path)
+    r = client.get("/entities/c1/app/events/relations")
     assert r.status_code == 200
-    assert "cytoscape" in r.text
+    body = r.json()
+    assert body["entity"]["name"] == "events"
+    assert body["upstream"] == []
+    assert [d["name"] for d in body["downstream"]] == ["mv"]
+    assert body["edges"] == [{"src": "c1/analytics/mv", "dst": "c1/app/events", "kind": "reads_from"}]
+    assert client.get("/entities/c1/app/nope/relations").status_code == 404
 
 
 def test_labels_crud(tmp_path):

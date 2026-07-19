@@ -1,19 +1,18 @@
-"""FastAPI app: graph + entity detail JSON, labels CRUD, sync trigger,
-static visualization page."""
-
-from pathlib import Path
+"""FastAPI app: graph + entity detail + relations JSON, labels CRUD, sync trigger."""
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.config import AppConfig
 from app.core.sync import run_sync
 from app.store.db import make_session_factory
-from app.store.queries import delete_label, get_entity, graph_payload, set_label
-
-WEB_DIR = Path(__file__).parent / "web"
+from app.store.queries import (
+    delete_label,
+    get_entity,
+    get_relations,
+    graph_payload,
+    set_label,
+)
 
 
 class LabelBody(BaseModel):
@@ -34,6 +33,14 @@ def create_app(cfg: AppConfig) -> FastAPI:
     def entity(cluster: str, database: str, name: str) -> dict:
         with factory() as s:
             payload = get_entity(s, cluster, database, name)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="entity not found")
+        return payload
+
+    @app.get("/entities/{cluster}/{database}/{name}/relations")
+    def relations(cluster: str, database: str, name: str) -> dict:
+        with factory() as s:
+            payload = get_relations(s, cluster, database, name)
         if payload is None:
             raise HTTPException(status_code=404, detail="entity not found")
         return payload
@@ -61,9 +68,4 @@ def create_app(cfg: AppConfig) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"no cluster matched {cluster!r}")
         return results
 
-    @app.get("/", include_in_schema=False)
-    def index() -> FileResponse:
-        return FileResponse(WEB_DIR / "index.html")
-
-    app.mount("/vendor", StaticFiles(directory=WEB_DIR / "vendor"), name="vendor")
     return app

@@ -4,7 +4,7 @@ from fastmcp import FastMCP
 
 from app.config import AppConfig
 from app.store.db import make_session_factory
-from app.store.queries import get_entity, graph_payload
+from app.store.queries import get_entity, get_relations, graph_payload
 
 
 def create_mcp(cfg: AppConfig) -> FastMCP:
@@ -25,6 +25,17 @@ def create_mcp(cfg: AppConfig) -> FastMCP:
         engine, attrs, labels."""
         with factory() as s:
             payload = get_entity(s, cluster, database, name)
+        if payload is None:
+            raise ValueError(f"entity not found: {cluster}/{database}/{name}")
+        return payload
+
+    @mcp.tool
+    def get_table_relations(cluster: str, database: str, name: str) -> dict:
+        """All entities related to one table: transitive upstream data sources,
+        transitive downstream consumers (MVs, views, aggregates, dictionaries),
+        and the dependency edges among them."""
+        with factory() as s:
+            payload = get_relations(s, cluster, database, name)
         if payload is None:
             raise ValueError(f"entity not found: {cluster}/{database}/{name}")
         return payload

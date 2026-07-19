@@ -1,8 +1,8 @@
 # oh-my-db
 
 Schema catalog service: introspects databases (ClickHouse first), stores table
-schemas + dependencies (MVs, views, dictionaries) as a graph, visualizes them,
-and later serves them over API/MCP for AI agents.
+schemas + dependencies (MVs, views, dictionaries) as a graph, and serves them
+over API/MCP for AI agents. No frontend for now (research deferred).
 
 ## Documents
 
@@ -33,8 +33,7 @@ Layout: `pyproject.toml`, `.venv`, `tests/` in repo root; all app code in `app/`
 - `app/cli.py` — `ohmydb sync`, `ohmydb serve`, `ohmydb mcp`.
 - `app/mcp.py` — fastmcp server (stdio) exposing catalog reads to AI agents.
 - `app/store/queries.py` — shared read/label helpers used by API and MCP.
-- `app/api.py` — FastAPI: `/graph`, `/entities/{cluster}/{db}/{name}`, serves `app/web/`.
-- `app/web/` — `index.html` (Cytoscape + dagre graph, vendored JS in `vendor/`, no build step).
+- `app/api.py` — FastAPI: `/graph`, `/entities/{cluster}/{db}/{name}` (+`/relations`), labels, `/sync`.
 - `config.yaml` — clusters + storage url.
 - `docker-compose.yaml` + `seed/` — local ClickHouse with sample schema for testing.
 
@@ -44,7 +43,7 @@ Layout: `pyproject.toml`, `.venv`, `tests/` in repo root; all app code in `app/`
 uv sync                       # install deps
 docker compose up -d          # local ClickHouse (seeded)
 uv run ohmydb sync            # introspect → SQLite
-uv run ohmydb serve           # visualization at http://127.0.0.1:8000
+uv run ohmydb serve           # HTTP API at http://127.0.0.1:8000
 uv run ohmydb mcp             # MCP server (stdio) for AI agents
 docker compose --profile postgres up -d   # optional Postgres backend
 uv run pytest                 # unit tests; integration tests auto-skip without ClickHouse
