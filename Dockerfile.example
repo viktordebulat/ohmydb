@@ -1,42 +1,52 @@
-# Builder stage: install deps with uv, create venv
+# syntax=docker/dockerfile:1
+
+# Builder: resolve + install deps into a self-contained venv with uv.
 FROM python:3.12-slim AS builder
 
-WORKDIR /build
+# uv binary from its official distroless image — no pip bootstrap needed.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Create venv explicitly (ensures pip is available)
-RUN python -m venv /build/.venv
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv
 
-# Copy lock files only (cache-friendly)
+WORKDIR /src
+
+# Deps first (cache layer independent of app code).
 COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
+
+# Then the project itself, installed non-editable so the venv is fully
+# self-contained (no .pth pointing back at this build dir).
 COPY app/ ./app/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable
 
-# Install uv into venv and sync dependencies
-RUN /build/.venv/bin/pip install -U pip uv
-RUN /build/.venv/bin/uv sync --frozen --no-dev
-
-# Install local package to ensure CLI entry point is created
-RUN /build/.venv/bin/pip install -e .
-
-# Final stage: runtime only, no build tools
+# Final: runtime only. No uv, no pip, no build tools.
 FROM python:3.12-slim
 
+# Strip the base image's system pip/setuptools — the app runs from a
+# self-contained venv and nothing should install packages at runtime.
+RUN python -m pip uninstall -y pip setuptools 2>/dev/null || true
+
+# Drop root. Own /app so the catalog sqlite (config.yaml default:
+# sqlite:///ohmydb.sqlite, relative to WORKDIR) is writable — mount a volume
+# here to persist it across restarts.
+RUN useradd --uid 10001 app && mkdir -p /app && chown app:app /app
 WORKDIR /app
 
-# Copy pre-built venv from builder (no pip/uv needed)
-COPY --from=builder /build/.venv /app/.venv
+# The venv carries the installed app package; only config is needed alongside.
+COPY --from=builder --chown=app:app /opt/venv /opt/venv
+COPY --chown=app:app config.yaml ./
 
-# Copy app code
-COPY app/ ./app/
-COPY pyproject.toml config.yaml ./
-
-# Activate venv by default
-ENV PATH="/app/.venv/bin:$PATH" \
+ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 
-# Reinstall package to fix entry point shebangs after venv copy
-RUN /app/.venv/bin/python -m pip install --force-reinstall --no-deps -e .
+USER app
+EXPOSE 8080
 
-# Default: serve API on :8080
-# Override: docker run my-image ohmydb mcp (for MCP)
-#           docker run my-image ohmydb sync (for sync)
-CMD ["ohmydb", "serve"]
+# API + MCP on one host. MCP mounted at /mcp, API at :8080.
+# Bind 0.0.0.0 so the port is reachable from outside the container.
+# Override CMD for one-shot jobs, e.g. `docker run IMAGE ohmydb sync`.
+CMD ["ohmydb", "serve", "--host", "0.0.0.0"]

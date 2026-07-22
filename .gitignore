@@ -1,15 +1,27 @@
-.venv/
+# Python
 __pycache__/
 *.pyc
-*.sqlite
 .pytest_cache/
+
 uv.lock
 
-.env
-.env/
+# Virtual environments
 .venv/
 venv/
+
+# Local databases
+*.sqlite
+
+# Environment
+.env
+.env/
 .envrc
 
+# Claude
 .claude/*
-!.claude/skills/*
+!.claude/skills/
+!.claude/skills/**
+
+# MCP
+.mcp.json
+!.mcp.json.example

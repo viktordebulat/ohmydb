@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from app.config import AppConfig
 from app.core.sync import run_sync
+from app.mcp import create_mcp
 from app.store.db import make_session_factory
 from app.store.queries import (
     delete_label,
@@ -22,7 +23,11 @@ class LabelBody(BaseModel):
 
 def create_app(cfg: AppConfig) -> FastAPI:
     factory = make_session_factory(cfg.storage_url)
-    app = FastAPI(title="ohmydb")
+    # MCP served over HTTP at /mcp; its lifespan must be handed to the parent
+    # app or the streamable-http session manager never starts.
+    mcp_app = create_mcp(cfg).http_app(path="/")
+    app = FastAPI(title="ohmydb", lifespan=mcp_app.lifespan)
+    app.mount("/mcp", mcp_app)
 
     @app.get("/graph")
     def graph() -> dict:

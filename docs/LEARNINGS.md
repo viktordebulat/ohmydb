@@ -32,6 +32,24 @@ Gotchas discovered during implementation. Append after each task, then compact
   runs in-memory; wrap in `asyncio.run()` — no pytest-asyncio needed.
 - Postgres swap really is conn-string-only: SQLAlchemy JSON columns and all
   sync/label logic ran unmodified on `postgresql+psycopg://`.
+- API + MCP on one host: `mcp.http_app(path="/")` → `app.mount("/mcp", it)`, and
+  pass `mcp_app.lifespan` to `FastAPI(lifespan=...)` — without the lifespan the
+  streamable-http session manager never starts and every `/mcp` call 500s. Probe
+  with a POST carrying `Accept: application/json, text/event-stream`; endpoint is
+  `/mcp/` (trailing slash). stdio `ohmydb mcp` stays for local-process clients.
+
+## Docker
+
+- `uv sync` installs the project **editable** by default (a `.pth` pointing at the
+  build dir); in a copy-out multi-stage image the source dir is gone → `No module
+  named 'app'`. Use `uv sync --no-editable` so the package lands in site-packages
+  and the venv is self-contained (can then drop the `COPY app/` from the final stage).
+- python:3.12-slim ships a system pip at `/usr/local/bin/pip` outside the venv;
+  copying only the venv doesn't remove it. `RUN python -m pip uninstall -y pip
+  setuptools` in the final stage to truly drop it.
+- `create_all` opens/creates the sqlite file at startup, so WORKDIR must be
+  writable by the non-root user (`chown app /app`) or serve crashes with
+  "unable to open database file".
 
 ## Web/UI (removed 2026-07-19, notes kept for future FE work)
 
