@@ -15,6 +15,9 @@ class ClusterConfig:
     username: str = "default"
     password: str = ""
     databases: list[str] = field(default_factory=list)
+    # Extra keyword args passed straight to the DB client, e.g.
+    # {secure: true, verify: false, connect_timeout: 30}. Adapter-specific.
+    extra: dict = field(default_factory=dict)
 
 
 @dataclass

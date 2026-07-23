@@ -1,5 +1,10 @@
 version: "3"
 
+# Local dev runs against the committed template; prod mounts its own config
+# and sets OHMYDB_CONFIG itself.
+env:
+  OHMYDB_CONFIG: config.example.yaml
+
 tasks:
   default:
     cmds:

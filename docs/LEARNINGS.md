@@ -50,6 +50,16 @@ Gotchas discovered during implementation. Append after each task, then compact
 - `create_all` opens/creates the sqlite file at startup, so WORKDIR must be
   writable by the non-root user (`chown app /app`) or serve crashes with
   "unable to open database file".
+- `uv sync --no-editable` caches the built project wheel keyed on **version**,
+  and the `--mount=type=cache` uv cache survives `docker build --no-cache` — so
+  code edits without a version bump silently ship a stale wheel. Add
+  `--reinstall-package <name>` on the project sync step to force a rebuild.
+- Config not baked into the image: default path resolves `--config` >
+  `OHMYDB_CONFIG` env > `config.yaml`; image sets `OHMYDB_CONFIG=/etc/ohmydb/
+  config.yaml` and the config is mounted there. `CLICKHOUSE_USER/PASSWORD` env
+  override per-cluster config (resolved in the CH adapter builder, not core
+  config.py, to keep core db-agnostic). Per-cluster `extra` dict is spread into
+  `clickhouse_connect.get_client(**extra)` for secure/verify/timeout tuning.
 
 ## Web/UI (removed 2026-07-19, notes kept for future FE work)
 
