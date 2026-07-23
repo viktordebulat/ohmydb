@@ -47,18 +47,21 @@ def _parse_dict_source(ddl: str, default_db: str) -> tuple[str, str] | None:
 class ClickHouseIntrospector:
     def __init__(self, cluster: str, host: str, port: int = 8123,
                  username: str = "default", password: str = "",
-                 databases: list[str] | None = None):
+                 databases: list[str] | None = None,
+                 extra: dict | None = None):
         self.cluster = cluster
         self.host = host
         self.port = port
         self.username = username
         self.password = password
         self.databases = databases or []
+        self.extra = extra or {}
 
     def _client(self):
         return clickhouse_connect.get_client(
             host=self.host, port=self.port,
             username=self.username, password=self.password,
+            **self.extra,
         )
 
     def introspect(self) -> tuple[list[Entity], list[Edge]]:
