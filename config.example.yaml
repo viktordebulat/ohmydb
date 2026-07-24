@@ -1,0 +1,26 @@
+storage:
+  # Local debug: sqlite, just a file url.
+  type: sqlite
+  url: sqlite:///ohmydb.sqlite
+  # Prod: postgres. Comment out the two lines above, uncomment below.
+  # type: postgres
+  # host: localhost
+  # port: 5432
+  # username: ohmydb
+  # password: "ohmydb"     # prod: prefer POSTGRES_PASSWORD env over this
+  # database: ohmydb
+
+clusters:
+  - name: local
+    type: clickhouse
+    host: localhost
+    port: 8123
+    username: default
+    password: "ohmydb"       # prod: prefer CLICKHOUSE_PASSWORD env over this
+    databases: []            # empty = all non-system databases
+    # extra: kwargs passed straight to the ClickHouse client. Examples:
+    # extra:
+    #   secure: true          # TLS
+    #   verify: false         # skip cert verification
+    #   connect_timeout: 30
+    #   send_receive_timeout: 300

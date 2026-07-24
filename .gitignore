@@ -1,9 +1,28 @@
-.venv/
+# Python
 __pycache__/
 *.pyc
-*.sqlite
 .pytest_cache/
-uv.lock
 
+# Virtual environments
+.venv/
+venv/
+
+# Local databases
+*.sqlite
+
+# Environment
+.env
+.env/
+.envrc
+
+# Local/real config (may hold secrets); template is config.example.yaml
+config.yaml
+
+# Claude
 .claude/*
-!.claude/skills/*
+!.claude/skills/
+!.claude/skills/**
+
+# MCP
+.mcp.json
+!.mcp.json.example

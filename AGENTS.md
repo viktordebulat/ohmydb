@@ -1,4 +1,4 @@
-# oh-my-db
+# ohmydb
 
 Schema catalog service: introspects databases (ClickHouse first), stores table
 schemas + dependencies (MVs, views, dictionaries) as a graph, and serves them
@@ -31,20 +31,29 @@ Layout: `pyproject.toml`, `.venv`, `tests/` in repo root; all app code in `app/`
 - `app/adapters/` — `base.py` Introspector protocol + per-DB adapters.
 - `app/store/` — SQLAlchemy models + sync/upsert logic. SQLite now, Postgres later (conn string swap).
 - `app/cli.py` — `ohmydb sync`, `ohmydb serve`, `ohmydb mcp`.
-- `app/mcp.py` — fastmcp server (stdio) exposing catalog reads to AI agents.
+- `app/mcp.py` — fastmcp server exposing catalog reads to AI agents. `ohmydb mcp` runs it over stdio; `serve` also mounts it over HTTP at `/mcp` (streamable-http) on the same host as the API.
 - `app/store/queries.py` — shared read/label helpers used by API and MCP.
-- `app/api.py` — FastAPI: `/graph`, `/entities/{cluster}/{db}/{name}` (+`/relations`), labels, `/sync`.
-- `config.yaml` — clusters + storage url.
-- `.mcp.json.example` — MCP registration for AI coding agents: `cp .mcp.json.example .mcp.json` (`.mcp.json` itself is gitignored); works as-is from repo root, add `--project <path>` to `args` when registering globally.
+- `app/api.py` — FastAPI: `/graph`, `/entities/{cluster}/{db}/{name}` (+`/relations`), labels, `/sync`, and MCP mounted at `/mcp`.
+- `config.example.yaml` — local-dev template (clusters + storage url + optional
+  per-cluster `extra` dict spread into the DB client, e.g. `{secure: true,
+  verify: false, connect_timeout: 30}`). Real config is gitignored `config.yaml`.
+  Config path resolves `--config` flag > `OHMYDB_CONFIG` env > `config.yaml`.
+  `CLICKHOUSE_USER`/`CLICKHOUSE_PASSWORD` env override the config's per-cluster
+  values (keep secrets out of the mounted file). Prod: mount config (configmap),
+  set `OHMYDB_CONFIG`, inject the CH env secrets — nothing is baked into the image.
+  `storage` block: `type: sqlite` (local debug, set `url`) or `type: postgres`
+  (prod, set `host`/`port`/`username`/`password`/`database`); `POSTGRES_USER`/
+  `POSTGRES_PASSWORD` env override the postgres secrets, same pattern as CH.
+- `.mcp.json.example` — MCP registration for AI coding agents: `cp .mcp.json.example .mcp.json` (`.mcp.json` itself is gitignored). Two entries: `ohmydb` (stdio, spawns `uv run ohmydb mcp`; add `--project <path>` to `args` when registering globally) and `ohmydb-http` (connects to a running `serve` at `http://127.0.0.1:8080/mcp/`). Keep one, drop the other.
 - `docker-compose.yaml` + `seed/` — local ClickHouse with sample schema for testing.
 
 ## Commands
 
 ```bash
-task up      # full local stack: seeded ClickHouse + sync + API on :8000
-task serve   # service only, no ClickHouse (existing catalog sqlite)
+task up      # full local stack: seeded ClickHouse + sync + API on :8080 (MCP at /mcp)
+task serve   # service only, no ClickHouse (API + MCP at /mcp, existing catalog sqlite)
 task sync    # re-introspect clusters
-task mcp     # MCP server (stdio) for AI agents
+task mcp     # MCP server over stdio (alternative to the HTTP /mcp mount)
 task test    # tests; integration auto-skips without ClickHouse
 task down    # stop containers   (task clean: also drop volumes + catalog)
 ```

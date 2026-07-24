@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from app.config import AppConfig
 from app.core.sync import run_sync
+from app.mcp import create_mcp
 from app.store.db import make_session_factory
 from app.store.queries import (
     delete_label,
@@ -22,7 +23,11 @@ class LabelBody(BaseModel):
 
 def create_app(cfg: AppConfig) -> FastAPI:
     factory = make_session_factory(cfg.storage_url)
-    app = FastAPI(title="oh-my-db")
+    # MCP served over HTTP at /mcp; its lifespan must be handed to the parent
+    # app or the streamable-http session manager never starts.
+    mcp_app = create_mcp(cfg).http_app(path="/")
+    app = FastAPI(title="ohmydb", lifespan=mcp_app.lifespan)
+    app.mount("/mcp", mcp_app)
 
     @app.get("/graph")
     def graph() -> dict:
@@ -65,7 +70,9 @@ def create_app(cfg: AppConfig) -> FastAPI:
         except Exception as e:  # introspection failed (cluster down, auth, ...)
             raise HTTPException(status_code=502, detail=str(e))
         if not results:
-            raise HTTPException(status_code=404, detail=f"no cluster matched {cluster!r}")
+            raise HTTPException(
+                status_code=404, detail=f"no cluster matched {cluster!r}"
+            )
         return results
 
     return app

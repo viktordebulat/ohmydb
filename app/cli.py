@@ -1,24 +1,29 @@
 """CLI: `ohmydb sync [--cluster NAME]` and `ohmydb serve`."""
 
 import argparse
+import os
 import sys
 
 from app.config import load_config
 from app.core.sync import run_sync
+
+# Config path: --config flag > OHMYDB_CONFIG env > local dev default. In prod
+# mount the config (k8s configmap) and point OHMYDB_CONFIG at it.
+DEFAULT_CONFIG = os.environ.get("OHMYDB_CONFIG", "config.yaml")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="ohmydb")
     sub = parser.add_subparsers(dest="command", required=True)
     sync_p = sub.add_parser("sync", help="introspect clusters and refresh stored state")
-    sync_p.add_argument("--config", default="config.yaml")
+    sync_p.add_argument("--config", default=DEFAULT_CONFIG)
     sync_p.add_argument("--cluster", default=None, help="sync only this cluster")
     serve_p = sub.add_parser("serve", help="serve HTTP API")
-    serve_p.add_argument("--config", default="config.yaml")
+    serve_p.add_argument("--config", default=DEFAULT_CONFIG)
     serve_p.add_argument("--host", default="127.0.0.1")
-    serve_p.add_argument("--port", type=int, default=8000)
+    serve_p.add_argument("--port", type=int, default=8080)
     mcp_p = sub.add_parser("mcp", help="run MCP server for AI agents (stdio)")
-    mcp_p.add_argument("--config", default="config.yaml")
+    mcp_p.add_argument("--config", default=DEFAULT_CONFIG)
     args = parser.parse_args()
 
     cfg = load_config(args.config)

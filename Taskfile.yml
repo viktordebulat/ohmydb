@@ -1,5 +1,10 @@
 version: "3"
 
+# Local dev runs against the committed template; prod mounts its own config
+# and sets OHMYDB_CONFIG itself.
+env:
+  OHMYDB_CONFIG: config.example.yaml
+
 tasks:
   default:
     cmds:
@@ -7,7 +12,7 @@ tasks:
     silent: true
 
   up:
-    desc: "Full local stack: seeded ClickHouse + sync + API"
+    desc: "Full local stack: seeded ClickHouse + sync + API (+ MCP at /mcp)"
     cmds:
       - uv sync
       # --wait only on clickhouse: it fails on the one-shot init container
@@ -18,7 +23,7 @@ tasks:
       - uv run ohmydb serve
 
   serve:
-    desc: "Service only: API against existing catalog (no ClickHouse)"
+    desc: "Service only: API + MCP (at /mcp) against existing catalog (no ClickHouse)"
     cmds:
       - uv sync
       - uv run ohmydb serve
@@ -29,7 +34,7 @@ tasks:
       - uv run ohmydb sync
 
   mcp:
-    desc: "MCP server (stdio) for AI agents"
+    desc: "MCP server over stdio (for AI agents that spawn a local process)"
     cmds:
       - uv run ohmydb mcp
 
