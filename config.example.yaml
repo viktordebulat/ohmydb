@@ -1,5 +1,14 @@
 storage:
+  # Local debug: sqlite, just a file url.
+  type: sqlite
   url: sqlite:///ohmydb.sqlite
+  # Prod: postgres. Comment out the two lines above, uncomment below.
+  # type: postgres
+  # host: localhost
+  # port: 5432
+  # username: ohmydb
+  # password: "ohmydb"     # prod: prefer POSTGRES_PASSWORD env over this
+  # database: ohmydb
 
 clusters:
   - name: local

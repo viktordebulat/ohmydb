@@ -41,6 +41,9 @@ Layout: `pyproject.toml`, `.venv`, `tests/` in repo root; all app code in `app/`
   `CLICKHOUSE_USER`/`CLICKHOUSE_PASSWORD` env override the config's per-cluster
   values (keep secrets out of the mounted file). Prod: mount config (configmap),
   set `OHMYDB_CONFIG`, inject the CH env secrets — nothing is baked into the image.
+  `storage` block: `type: sqlite` (local debug, set `url`) or `type: postgres`
+  (prod, set `host`/`port`/`username`/`password`/`database`); `POSTGRES_USER`/
+  `POSTGRES_PASSWORD` env override the postgres secrets, same pattern as CH.
 - `.mcp.json.example` — MCP registration for AI coding agents: `cp .mcp.json.example .mcp.json` (`.mcp.json` itself is gitignored). Two entries: `ohmydb` (stdio, spawns `uv run ohmydb mcp`; add `--project <path>` to `args` when registering globally) and `ohmydb-http` (connects to a running `serve` at `http://127.0.0.1:8080/mcp/`). Keep one, drop the other.
 - `docker-compose.yaml` + `seed/` — local ClickHouse with sample schema for testing.
 
