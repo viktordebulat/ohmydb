@@ -39,6 +39,11 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   cluster-level `synced_at` (one value, not per node); `get_relations`
   dropped its `edges` list (redundant — membership in upstream/downstream
   already implies the dependency direction).
+- **M6 (2026-07-25)**: unit-test gate as its own `Dockerfile.example` stage —
+  `docker build` now fails on a broken test, not just CI. Verified locally:
+  clean build runs the full suite inside the `test` stage (integration tests
+  auto-skip, no live ClickHouse in the build sandbox); an injected failing
+  test aborts the build with the pytest failure in the error output.
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
@@ -51,62 +56,36 @@ Each entry below is written to be picked up by another agent with no other
 context than this repo. Where a design decision is genuinely open, a
 recommendation is given — take it unless you find a concrete reason not to.
 
-### 1. Array/CSV encoding for `get_schema_graph` (MCP token cost, follow-up)
+### 1. Array/CSV encoding for `get_schema_graph` (MCP token cost, on hold)
 
 Deferred from M5's cluster-scoping work (see LEARNINGS.md "Stack" for the
 rest of that token-cost research — typed returns don't shrink payload size,
 no MCP-protocol pagination exists for tool *results*, only for
-`list_tools`/`list_resources`). What's left:
+`list_tools`/`list_resources`).
 
-Array-of-arrays/CSV-style encoding (drop the ~9 repeated dict keys per node
-in `graph_payload`'s `nodes` list) only pays off once real per-cluster entity
-counts are genuinely in the hundreds+ — cluster-scoping (shipped M5) already
-cut payload by cluster count, which was the bigger lever. **Don't build this
-speculatively** — first check real per-cluster entity counts against a
-production catalog after M5 has been running a while; only pick this up if
-counts are actually in the hundreds+ and scoping proves insufficient on its
-own. Needs `output_schema=None` or a `{columns, rows}` wrapper since fastmcp's
-auto schema requires an object.
+**Entity-count gate is now satisfied**: production clusters expect 200+
+tables across 2 clusters, each with multiple upstream/downstream deps — the
+hundreds+ threshold this item was waiting on. **But a second, harder blocker
+surfaced on review (2026-07-25) and isn't resolved**: other agents/clients
+may already depend on `get_schema_graph`'s current dict-keyed node shape.
+Positional array encoding is a breaking wire-format change for anyone already
+integrated — swapping it silently risks correctness (silent misread of a
+shifted column) for consumers we don't control, not just a client-side
+update. Before picking this up: identify who/what currently calls
+`get_schema_graph` in practice, and design either a versioned/opt-in tool
+variant or confirm there are no external consumers yet. Don't just re-check
+entity counts and proceed — that gate is cleared, this one isn't.
 
-Touches: `app/store/queries.py: graph_payload`, `app/mcp.py`.
+Also still true: array-of-arrays/CSV-style encoding needs `output_schema=None`
+or a `{columns, rows}` wrapper since fastmcp's auto schema requires an object.
+Apply the transform only in the MCP wrapper (`app/mcp.py`), not inside
+`graph_payload()` itself — that function also backs `GET /graph/{cluster}`
+over plain HTTP, which has no token-cost reason to lose its self-describing
+dict shape.
 
-### 2. Unit-test gate as its own Dockerfile stage
+Touches: `app/mcp.py` only (see above — not `graph_payload`).
 
-**Goal**: `docker build` must fail if unit tests fail — not just CI running
-`task test` separately, the *image build itself* should refuse to produce an
-artifact from broken code.
-
-**Design** (`Dockerfile.example`): add a `test` stage between `builder` and
-the final runtime stage. It installs dev deps (drop `--no-dev`) on top of the
-builder's venv, copies in `tests/`, runs `pytest`, and on success touches a
-zero-byte marker file. The final stage then does
-`COPY --from=test /tmp/tests-passed /tmp/tests-passed` — a throwaway file
-whose only purpose is to force BuildKit to build and pass the `test` stage
-before the final stage can complete, without pulling dev dependencies or test
-files into the shipped image (final still copies the venv `--from=builder`,
-which stays `--no-dev`).
-
-```dockerfile
-FROM builder AS test
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-editable --reinstall-package ohmydb
-COPY tests/ ./tests/
-RUN uv run pytest && touch /tmp/tests-passed
-
-FROM python:3.12-slim
-...
-COPY --from=test /tmp/tests-passed /tmp/tests-passed
-COPY --from=builder --chown=app:app /opt/venv /opt/venv
-...
-```
-
-Integration tests (`tests/test_clickhouse_integration.py`) auto-skip without
-a reachable ClickHouse, so they're a no-op inside the build sandbox — no
-special-casing needed.
-
-Touches: `Dockerfile.example` only.
-
-### 3. Config-driven auto-labeling during sync
+### 2. Config-driven auto-labeling during sync
 
 **Goal**: derive labels automatically from entity properties (engine, kind,
 name/database pattern) instead of only manual `PUT /labels/...` calls.

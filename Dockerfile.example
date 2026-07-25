@@ -25,6 +25,17 @@ COPY app/ ./app/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable --reinstall-package ohmydb
 
+# Test gate: the build itself fails if unit tests fail, not just CI running
+# `task test` separately. Runs on top of the builder's venv with dev deps
+# added back in; the marker file it produces is copied (never its layers)
+# into the final stage purely to force BuildKit to run this stage first —
+# no dev deps or test files end up in the shipped image.
+FROM builder AS test
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-editable --reinstall-package ohmydb
+COPY tests/ ./tests/
+RUN uv run pytest && touch /tmp/tests-passed
+
 # Final: runtime only. No uv, no pip, no build tools.
 FROM python:3.12-slim
 
@@ -40,6 +51,7 @@ WORKDIR /app
 
 # The venv carries the installed app package — nothing else is baked in.
 COPY --from=builder --chown=app:app /opt/venv /opt/venv
+COPY --from=test /tmp/tests-passed /tmp/tests-passed
 
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
