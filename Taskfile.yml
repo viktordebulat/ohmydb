@@ -43,6 +43,17 @@ tasks:
     cmds:
       - uv run pytest
 
+  docs:verify:
+    desc: "Fail if ARCHITECTURE.md's module table has drifted from app/"
+    cmds:
+      - ./scripts/check-docs.sh
+
+  check:
+    desc: "Full check: tests + architecture docs drift"
+    cmds:
+      - task: test
+      - task: docs:verify
+
   down:
     desc: "Stop containers"
     cmds:
