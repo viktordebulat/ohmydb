@@ -29,10 +29,14 @@ def create_app(cfg: AppConfig) -> FastAPI:
     app = FastAPI(title="ohmydb", lifespan=mcp_app.lifespan)
     app.mount("/mcp", mcp_app)
 
-    @app.get("/graph")
-    def graph() -> dict:
+    @app.get("/clusters")
+    def clusters() -> list[str]:
+        return [c.name for c in cfg.clusters]
+
+    @app.get("/graph/{cluster}")
+    def graph(cluster: str) -> dict:
         with factory() as s:
-            return graph_payload(s)
+            return graph_payload(s, cluster)
 
     @app.get("/entities/{cluster}/{database}/{name}")
     def entity(cluster: str, database: str, name: str) -> dict:

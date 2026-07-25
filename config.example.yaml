@@ -10,13 +10,18 @@ storage:
   # password: "ohmydb"     # prod: prefer POSTGRES_PASSWORD env over this
   # database: ohmydb
 
+# Credential env precedence per cluster (highest wins):
+#   CLICKHOUSE_USER__<KEY> / CLICKHOUSE_PASSWORD__<KEY>   (KEY = cluster name,
+#     uppercased, non-alphanumerics -> "_", e.g. "prod-eu" -> "PROD_EU")
+#   CLICKHOUSE_USER / CLICKHOUSE_PASSWORD                 (global fallback)
+#   this file's username/password
 clusters:
   - name: local
     type: clickhouse
     host: localhost
     port: 8123
     username: default
-    password: "ohmydb"       # prod: prefer CLICKHOUSE_PASSWORD env over this
+    password: "ohmydb"       # prod: prefer CLICKHOUSE_PASSWORD[__KEY] env over this
     databases: []            # empty = all non-system databases
     # extra: kwargs passed straight to the ClickHouse client. Examples:
     # extra:

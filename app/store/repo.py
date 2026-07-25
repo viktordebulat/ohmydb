@@ -6,8 +6,19 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.core.models import Edge, Entity, EntityKind, Identity
+from app.core.models import Edge, EdgeKind, Entity, EntityKind, Identity
 from app.store.db import EdgeRow, EntityRow
+
+
+def _reachable(adj: dict[int, set[int]], start: int) -> set[int]:
+    seen: set[int] = set()
+    stack = [start]
+    while stack:
+        for nxt in adj.get(stack.pop(), ()):
+            if nxt != start and nxt not in seen:
+                seen.add(nxt)
+                stack.append(nxt)
+    return seen
 
 
 def sync_cluster(session: Session, cluster: str, entities: list[Entity], edges: list[Edge]) -> dict:
@@ -71,6 +82,22 @@ def sync_cluster(session: Session, cluster: str, entities: list[Entity], edges: 
             dst_id=by_identity[edge.dst].id,
             kind=edge.kind.value,
         ))
+
+    # Precompute transitive relations so reads (get_relations) are a lookup,
+    # not a per-call BFS. Data-flow direction: writes_to flows src->dst,
+    # reads_from/dict_source flow dst->src (mirrors store/queries.py's old
+    # in-request walk, moved here since sync is infrequent and reads aren't).
+    flow_out: dict[int, set[int]] = {}
+    flow_in: dict[int, set[int]] = {}
+    for edge in edges:
+        src_id, dst_id = by_identity[edge.src].id, by_identity[edge.dst].id
+        frm, to = (src_id, dst_id) if edge.kind == EdgeKind.WRITES_TO else (dst_id, src_id)
+        flow_out.setdefault(frm, set()).add(to)
+        flow_in.setdefault(to, set()).add(frm)
+
+    for row in by_identity.values():
+        row.upstream = sorted(_reachable(flow_in, row.id))
+        row.downstream = sorted(_reachable(flow_out, row.id))
 
     session.commit()
     return {"created": created, "updated": updated, "deleted": deleted, "edges": len(edges)}

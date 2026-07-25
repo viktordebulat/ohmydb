@@ -1,4 +1,12 @@
-from app.adapters.clickhouse import _extract_sources, _extract_to_target, _parse_dict_source
+from app.adapters.clickhouse import (
+    _EXTERNAL_ENGINES,
+    _extract_sources,
+    _extract_to_target,
+    _KIND_BY_ENGINE,
+    _parse_dict_source,
+    _parse_distributed_target,
+)
+from app.core.models import EntityKind
 
 
 def test_to_target_qualified():
@@ -39,3 +47,41 @@ def test_parse_dict_source_defaults_db():
 def test_parse_dict_source_non_clickhouse():
     ddl = "CREATE DICTIONARY app.d (`id` UInt64) PRIMARY KEY id SOURCE(MYSQL(TABLE 'users')) LAYOUT(FLAT())"
     assert _parse_dict_source(ddl, "app") is None
+
+
+def test_window_and_live_view_map_to_view():
+    assert _KIND_BY_ENGINE["WindowView"] == EntityKind.VIEW
+    assert _KIND_BY_ENGINE["LiveView"] == EntityKind.VIEW
+
+
+def test_distributed_target_qualified():
+    ddl = "CREATE TABLE app.events_all ENGINE = Distributed('my_cluster', app, events, rand())"
+    assert _parse_distributed_target(ddl, "app") == ("app", "events")
+
+
+def test_distributed_target_quoted_parts():
+    ddl = "CREATE TABLE app.events_all ENGINE = Distributed('my_cluster', 'app', 'events')"
+    assert _parse_distributed_target(ddl, "other") == ("app", "events")
+
+
+def test_distributed_target_current_database_defaults():
+    ddl = "CREATE TABLE app.events_all ENGINE = Distributed('my_cluster', currentDatabase(), events)"
+    assert _parse_distributed_target(ddl, "app") == ("app", "events")
+
+
+def test_distributed_target_empty_database_defaults():
+    ddl = "CREATE TABLE app.events_all ENGINE = Distributed('my_cluster', '', events)"
+    assert _parse_distributed_target(ddl, "app") == ("app", "events")
+
+
+def test_distributed_target_absent():
+    assert _parse_distributed_target("CREATE TABLE app.t ENGINE = MergeTree ORDER BY x", "app") is None
+
+
+def test_external_engines_flagged():
+    assert "S3" in _EXTERNAL_ENGINES
+    assert "PostgreSQL" in _EXTERNAL_ENGINES
+    assert "Kafka" in _EXTERNAL_ENGINES
+    assert "RabbitMQ" in _EXTERNAL_ENGINES
+    assert "MergeTree" not in _EXTERNAL_ENGINES
+    assert "EmbeddedRocksDB" not in _EXTERNAL_ENGINES

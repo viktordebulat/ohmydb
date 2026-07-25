@@ -12,6 +12,24 @@ _KIND_BY_ENGINE = {
     "MaterializedView": EntityKind.MAT_VIEW,
     "View": EntityKind.VIEW,
     "Dictionary": EntityKind.DICTIONARY,
+    # Continuous-query engines like MVs; mapping to VIEW reuses the existing
+    # FROM/JOIN regex-fallback lineage path (gated on kind in (MAT_VIEW, VIEW)).
+    "WindowView": EntityKind.VIEW,
+    "LiveView": EntityKind.VIEW,
+}
+
+# Engines backed by storage/queues outside this cluster (pure proxies — hold
+# no data of their own). Not statically resolvable to an edge target; flagged
+# so API/MCP consumers don't need to hardcode engine names client-side.
+# Deliberately excludes engines that keep a local replicated/embedded copy
+# (EmbeddedRocksDB, TimeSeries, MaterializedPostgreSQL) — those serve reads
+# from local storage even though their source of truth is external.
+_EXTERNAL_ENGINES = {
+    "S3", "URL", "MySQL", "PostgreSQL", "HDFS", "ODBC", "JDBC",
+    "Iceberg", "DeltaLake", "Hudi", "ExternalDistributed",
+    "MongoDB", "Redis", "Kafka", "RabbitMQ", "NATS", "SQLite",
+    "S3Queue", "AzureBlobStorage", "AzureQueue", "Hive", "Paimon",
+    "ArrowFlight", "YTsaurus",
 }
 
 
@@ -22,6 +40,31 @@ def _extract_to_target(ddl: str, default_db: str) -> tuple[str, str] | None:
     if not m:
         return None
     return (m.group(1) or default_db, m.group(2))
+
+
+def _parse_distributed_target(ddl: str, default_db: str) -> tuple[str, str] | None:
+    """Target of `ENGINE = Distributed(cluster, database, table[, sharding_key])`.
+    `database` is often `currentDatabase()` or empty (meaning "this db")."""
+    m = re.search(r"\bDistributed\(", ddl, flags=re.IGNORECASE)
+    if not m:
+        return None
+    # Balanced-paren scan: `database` param may itself be a call like
+    # currentDatabase(), which a naive up-to-first-`)` regex would truncate on.
+    start = m.end()
+    depth = 1
+    end = start
+    while end < len(ddl) and depth:
+        depth += {"(": 1, ")": -1}.get(ddl[end], 0)
+        end += 1
+    if depth:
+        return None
+    parts = [p.strip().strip("'\"`") for p in ddl[start:end - 1].split(",")]
+    if len(parts) < 3:
+        return None
+    db = parts[1]
+    if not db or db.endswith("()"):
+        db = default_db
+    return (db, parts[2])
 
 
 def _extract_sources(ddl: str) -> list[tuple[str, str]]:
@@ -109,6 +152,12 @@ class ClickHouseIntrospector:
                 # and refreshable MVs (no insert trigger).
                 for src_db, src_table in _extract_sources(ddl):
                     add_edge((db, name), (src_db, src_table), EdgeKind.READS_FROM)
+            if engine == "Distributed":
+                target = _parse_distributed_target(ddl, db)
+                if target:
+                    add_edge((db, name), target, EdgeKind.READS_FROM)
+            if engine in _EXTERNAL_ENGINES:
+                attrs["external"] = True
             # Reverse deps: this table's dependents are views reading from it.
             for dep_db, dep_table in zip(dep_dbs, dep_tables):
                 add_edge((dep_db, dep_table), (db, name), EdgeKind.READS_FROM)

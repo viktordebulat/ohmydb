@@ -54,7 +54,26 @@ class AppConfig:
 
 def load_config(path: str | Path) -> AppConfig:
     raw = yaml.safe_load(Path(path).read_text())
+    clusters = [ClusterConfig(**c) for c in raw["clusters"]]
+    _check_cluster_key_collisions(clusters)
     return AppConfig(
         storage_url=StorageConfig(**raw["storage"]).resolve_url(),
-        clusters=[ClusterConfig(**c) for c in raw["clusters"]],
+        clusters=clusters,
     )
+
+
+def _check_cluster_key_collisions(clusters: list[ClusterConfig]) -> None:
+    """Two cluster names can sanitize to the same per-cluster credential env
+    key (see app/adapters/__init__.py: cluster_env_key), e.g. `prod-eu` vs
+    `prod_eu` — fail fast instead of silently mixing up credentials."""
+    from app.adapters import cluster_env_key
+
+    seen: dict[str, str] = {}
+    for c in clusters:
+        key = cluster_env_key(c.name)
+        if key in seen and seen[key] != c.name:
+            raise ValueError(
+                f"cluster names {seen[key]!r} and {c.name!r} both sanitize to "
+                f"the same credential env key {key!r} — rename one"
+            )
+        seen[key] = c.name
