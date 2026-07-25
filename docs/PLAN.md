@@ -44,6 +44,27 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   clean build runs the full suite inside the `test` stage (integration tests
   auto-skip, no live ClickHouse in the build sandbox); an injected failing
   test aborts the build with the pytest failure in the error output.
+- **M7 (2026-07-25)**: Alembic replaces `Base.metadata.create_all()` —
+  supersedes the "drop and resync the catalog" upgrade path from M5/M6
+  (that caveat no longer applies; schema changes are now a migration, not a
+  wipe). `app/store/db.py: run_migrations()` runs `alembic upgrade head` on
+  the engine's own connection (required for in-memory sqlite — a second,
+  separately-opened `sqlite://` connection is a different empty database)
+  and is called from `make_session_factory()`, so `sync`/`serve`/`mcp`/tests
+  all auto-migrate with no separate step. `task db:revision -- "message"`
+  autogenerates new migrations from `app/store/db.py` model changes (must be
+  run against a catalog already at head — an empty/fresh db just re-diffs
+  the full schema). One baseline revision (`app/migrations/versions/`)
+  captures the schema as of M5. Migration scripts live inside the `app`
+  package (`app/migrations/`, not the repo-root `alembic/` convention `init`
+  scaffolds by default) so they resolve from a non-editable install too —
+  Dockerfile.example's final stage only ships the built venv, not the repo
+  checkout; a `Path(__file__).parents[N]`-style repo-root lookup would have
+  broken there. `alembic.ini` at the repo root still exists, purely for the
+  dev CLI (`task db:revision`, manual `alembic upgrade head`). Verified end to end, not just unit-tested: seeded a real
+  sqlite file via `make_session_factory`, wrote a scratch "add a column"
+  migration, re-opened the same file, and confirmed the new column existed
+  *and* the seeded row survived — the thing `create_all` could never do.
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
@@ -130,6 +151,6 @@ more matching labels but not suppress a global one) — keep it additive-only
 until there's a concrete need for overrides.
 
 Touches: `app/config.py`, `app/core/` (new module), `app/store/db.py`
-(`LabelRow.source` column — same no-Alembic migration caveat as M5's
-`upstream`/`downstream` columns, see LEARNINGS.md "Stack"), `app/store/repo.py`,
-`app/store/queries.py` (labels reads should probably expose `source` too).
+(`LabelRow.source` column — run `task db:revision -- "labelrow source"` to
+generate the migration, see M7), `app/store/repo.py`, `app/store/queries.py`
+(labels reads should probably expose `source` too).

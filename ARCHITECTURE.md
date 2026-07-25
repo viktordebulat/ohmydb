@@ -30,7 +30,8 @@ graph, and serves them over HTTP API and MCP for AI agents.
 |---|---|---|---|
 | `app/core` | DB-agnostic model + sync orchestration | `Entity`, `Edge`, `EntityKind`, `EdgeKind`, `run_sync()` | `app/adapters`, `app/store` |
 | `app/adapters` | DB-specific introspection; ClickHouse is the only impl | `Introspector` protocol, `build_introspector()`, ClickHouse parsing | `app/core` |
-| `app/store` | Persistence: SQLAlchemy models, upsert logic, read queries | `EntityRow`/`EdgeRow`/`LabelRow`, `sync_cluster()`, `graph_payload()`, `get_entity()`, `get_relations()` | `app/core` |
+| `app/store` | Persistence: SQLAlchemy models, upsert logic, read queries, schema migrations | `EntityRow`/`EdgeRow`/`LabelRow`, `sync_cluster()`, `graph_payload()`, `get_entity()`, `get_relations()`, `run_migrations()` | `app/core` |
+| `app/migrations` | Alembic migration scripts, shipped inside the package (not repo-root `alembic/`) so they resolve from a non-editable install too | `env.py`, `versions/*.py` | `app/store` |
 | `app/config.py` | Load `config.yaml` → typed config | `load_config()`, `AppConfig` | — |
 | `app/cli.py` | `ohmydb sync\|serve\|mcp` entry point | `main()` | `app/config`, `app/core`, `app/api`, `app/mcp` |
 | `app/api.py` | FastAPI HTTP surface; mounts MCP at `/mcp` | `create_app()` | `app/config`, `app/core`, `app/store`, `app/mcp` |
@@ -48,7 +49,7 @@ else must stay database-agnostic (see AGENTS.md rule).
 | Task | Module |
 |---|---|
 | Support a new database engine | new file in `app/adapters/`, implement `Introspector` |
-| Change what's stored per entity/edge | `app/core/models.py` + `app/store/db.py` (+ adapter that populates it) |
+| Change what's stored per entity/edge | `app/core/models.py` + `app/store/db.py` (+ adapter that populates it) + `task db:revision -- "message"` to generate the Alembic migration |
 | Add an API endpoint | `app/api.py`, reuse/extend `app/store/queries.py` |
 | Add an MCP tool | `app/mcp.py`, reuse `app/store/queries.py` |
 | Change sync/upsert behavior | `app/store/repo.py` |

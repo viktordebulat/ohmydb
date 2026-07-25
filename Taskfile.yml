@@ -48,6 +48,11 @@ tasks:
     cmds:
       - ./scripts/check-docs.sh
 
+  db:revision:
+    desc: "Autogenerate an Alembic migration from app/store/db.py model changes"
+    cmds:
+      - uv run alembic revision --autogenerate -m "{{.CLI_ARGS}}"
+
   check:
     desc: "Full check: tests + architecture docs drift"
     cmds:
