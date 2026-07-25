@@ -7,7 +7,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.models import Edge, EdgeKind, Entity, EntityKind, Identity
-from app.store.db import EdgeRow, EntityRow
+from app.store.db import EdgeRow, EntityRow, LabelRow
 
 
 def _reachable(adj: dict[int, set[int]], start: int) -> set[int]:
@@ -101,3 +101,26 @@ def sync_cluster(session: Session, cluster: str, entities: list[Entity], edges: 
 
     session.commit()
     return {"created": created, "updated": updated, "deleted": deleted, "edges": len(edges)}
+
+
+def sync_auto_labels(session: Session, cluster: str, auto_labels: list[tuple[Identity, str, str]]) -> None:
+    """Replace this cluster's `source=auto` labels with the given
+    (identity, key, value) triples (from app.core.labeling.apply_label_rules).
+    Skips a key that already has a manual label for that identity — manual
+    edits always win. Commits."""
+    manual_keys = {
+        (row.database, row.table_name, row.key)
+        for row in session.scalars(
+            select(LabelRow).where(LabelRow.cluster == cluster, LabelRow.source == "manual")
+        ).all()
+    }
+    session.execute(delete(LabelRow).where(LabelRow.cluster == cluster, LabelRow.source == "auto"))
+    for identity, key, value in auto_labels:
+        _, database, name = identity
+        if (database, name, key) in manual_keys:
+            continue
+        session.add(LabelRow(
+            cluster=cluster, database=database, table_name=name,
+            key=key, value=value, source="auto",
+        ))
+    session.commit()

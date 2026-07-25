@@ -62,6 +62,10 @@ class LabelRow(Base):
     table_name: Mapped[str] = mapped_column(String(255))
     key: Mapped[str] = mapped_column(String(255))
     value: Mapped[str] = mapped_column(String(1024), default="")
+    # "manual" (PUT /labels) or "auto" (config label_rules, rederived every
+    # sync — see store/repo.py: sync_auto_labels). Existing rows predate this
+    # column and were all manual, hence the server-side default.
+    source: Mapped[str] = mapped_column(String(16), default="manual", server_default="manual")
 
 
 def run_migrations(engine: Engine) -> None:

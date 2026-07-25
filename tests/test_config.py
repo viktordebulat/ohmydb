@@ -20,3 +20,26 @@ def test_load_config_ok(tmp_path):
 def test_load_config_rejects_colliding_cluster_keys(tmp_path):
     with pytest.raises(ValueError, match="prod-eu.*prod_eu|prod_eu.*prod-eu"):
         load_config(_write(tmp_path, ["prod-eu", "prod_eu"]))
+
+
+def test_load_config_parses_global_and_per_cluster_label_rules(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("""
+storage:
+  type: sqlite
+  url: sqlite:///x.sqlite
+label_rules:
+  - match: {kind: dictionary}
+    label: {key: source, value: dictionary}
+clusters:
+  - name: prod
+    host: localhost
+    label_rules:
+      - match: {engine: Kafka}
+        label: {key: source, value: streaming}
+""")
+    cfg = load_config(path)
+    assert cfg.label_rules == [{"match": {"kind": "dictionary"}, "label": {"key": "source", "value": "dictionary"}}]
+    assert cfg.clusters[0].label_rules == [
+        {"match": {"engine": "Kafka"}, "label": {"key": "source", "value": "streaming"}}
+    ]

@@ -44,12 +44,19 @@ class ClusterConfig:
     # Extra keyword args passed straight to the DB client, e.g.
     # {secure: true, verify: false, connect_timeout: 30}. Adapter-specific.
     extra: dict = field(default_factory=dict)
+    # Auto-labeling rules for this cluster, applied after the global list
+    # (see AppConfig.label_rules and app/core/labeling.py). Each entry:
+    # {match: {engine|kind|name_pattern|database_pattern: ...}, label: {key, value}}.
+    label_rules: list[dict] = field(default_factory=list)
 
 
 @dataclass
 class AppConfig:
     storage_url: str
     clusters: list[ClusterConfig]
+    # Global auto-labeling rules, applied to every cluster before its own
+    # label_rules (additive — see app/core/labeling.py).
+    label_rules: list[dict] = field(default_factory=list)
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -59,6 +66,7 @@ def load_config(path: str | Path) -> AppConfig:
     return AppConfig(
         storage_url=StorageConfig(**raw["storage"]).resolve_url(),
         clusters=clusters,
+        label_rules=raw.get("label_rules", []),
     )
 
 
