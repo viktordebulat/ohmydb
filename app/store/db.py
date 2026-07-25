@@ -1,9 +1,20 @@
 """SQLAlchemy models. SQLite now, Postgres later — same code, different URL."""
 
 from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, UniqueConstraint, create_engine
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+
+# Migration scripts ship inside the app package (app/migrations/) rather
+# than under the repo-root alembic/ convention, so they're resolvable both
+# in a repo checkout and from a non-editable install (Docker: the wheel only
+# packages app/, not the repo root — see Dockerfile.example). alembic.ini at
+# the repo root exists purely for the dev CLI (`alembic revision
+# --autogenerate`, `task db:revision`); this path is what actually runs at
+# app startup.
+_MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
 
 
 class Base(DeclarativeBase):
@@ -53,11 +64,22 @@ class LabelRow(Base):
     value: Mapped[str] = mapped_column(String(1024), default="")
 
 
+def run_migrations(engine: Engine) -> None:
+    """Bring the schema at `engine` up to head via Alembic
+    (app/migrations/versions/). Runs on the engine's own connection —
+    required for in-memory sqlite, where a second, separately-opened
+    connection is a different empty database."""
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
+    with engine.connect() as connection:
+        cfg.attributes["connection"] = connection
+        command.upgrade(cfg, "head")
+
+
 def make_session_factory(url: str) -> sessionmaker[Session]:
-    # No migration framework (no Alembic): create_all only creates missing
-    # *tables*, it won't add columns to an existing one. Upgrade path for a
-    # schema change like this is "drop and resync the catalog" (task clean +
-    # resync) — see docs/LEARNINGS.md.
     engine = create_engine(url)
-    Base.metadata.create_all(engine)
+    run_migrations(engine)
     return sessionmaker(engine, expire_on_commit=False)
