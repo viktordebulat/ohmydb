@@ -138,6 +138,7 @@ def set_label(session: Session, cluster: str, database: str, table: str, key: st
         row = LabelRow(cluster=cluster, database=database, table_name=table, key=key)
         session.add(row)
     row.value = value
+    row.source = "manual"  # an explicit PUT always overrides a prior auto label
     session.commit()
 
 

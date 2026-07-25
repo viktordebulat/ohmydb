@@ -71,6 +71,26 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   fully captured by its own `upstream`/`downstream` fields, so a caller
   needing that for one entity should call `get_table_relations` instead of
   walking a graph-wide edge list. `/graph` now returns node briefs only.
+- **M9 (2026-07-25)**: config-driven auto-labeling. New optional
+  `label_rules` config key, global (`AppConfig.label_rules`) and per-cluster
+  (`ClusterConfig.label_rules`), matched via `app/core/labeling.py:
+  apply_label_rules()` (engine/kind exact match, name_pattern/database_pattern
+  regex; all matching rules apply and accumulate; same-key conflicts resolve
+  last-rule-wins). `LabelRow` gained a `source` column (`manual` default,
+  `auto` for rule-derived rows — migration `6ab50cc9755f`, existing rows
+  backfilled `manual` via `server_default`). `run_sync()` computes auto
+  labels from the introspected entities and calls `store/repo.py:
+  sync_auto_labels()`, which replaces the cluster's `source=auto` rows every
+  sync but skips any key that already has a `source=manual` row for that
+  identity — a manual `PUT /labels` always wins, and re-applies `source=
+  "manual"` even if it's overwriting a previously auto-derived row. Reads
+  (`get_entity`, `graph_payload`, `get_relations`) still return labels as a
+  flat `{key: value}` dict — `source` isn't surfaced there; exposing it would
+  change the label shape everywhere labels appear, so it's left for a
+  follow-up if a caller actually needs to distinguish auto vs. manual.
+  Verified end to end against the seeded local ClickHouse: global +
+  per-cluster rules both applied on `ohmydb sync`, and a manual label set via
+  `set_label` survived a second sync where its rule-derived value differed.
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
@@ -112,51 +132,3 @@ dict shape.
 
 Touches: `app/mcp.py` only (see above — not `graph_payload`).
 
-### 2. Config-driven auto-labeling during sync
-
-**Goal**: derive labels automatically from entity properties (engine, kind,
-name/database pattern) instead of only manual `PUT /labels/...` calls.
-
-**Config shape** (new optional section, per-cluster and/or global):
-```yaml
-clusters:
-  - name: prod
-    ...
-    label_rules:
-      - match: {engine: Kafka}
-        label: {key: source, value: streaming}
-      - match: {kind: dictionary}
-        label: {key: source, value: dictionary}
-      - match: {name_pattern: "^raw_"}
-        label: {key: layer, value: raw}
-```
-Matchers: `engine` (exact match), `kind`, `name_pattern`/`database_pattern`
-(regex — stay consistent with the adapter's own regex-heavy style). All
-conditions in one rule AND together. **All matching rules apply** (labels
-accumulate across rules); if two rules set the same key, last rule in the
-list wins — documented, not silently ambiguous.
-
-**Manual vs. auto labels must not clobber each other.** Add a `source`
-column to `LabelRow` (`manual` default — what `PUT /labels` writes — or
-`auto`). Sync re-derives all `auto` labels for a cluster every run (delete
-`source=auto` rows for that cluster, reinsert from the current rule
-evaluation — same replace-per-cluster pattern already used for edges in
-`sync_cluster`), but **skips writing an auto label for a key that already has
-a manual label** for that identity, so a user's manual edit always wins.
-
-**Where it lives**: matching itself is DB-agnostic (operates on `Entity.kind`/
-`engine`/`database`/`name`, all core fields) — put the rule engine in
-`app/core` (e.g. `app/core/labeling.py: apply_label_rules(entities, rules) -> list[(Identity, key, value)]`),
-called from `run_sync()`/`sync_cluster()`. Config parsing addition in
-`app/config.py` (`ClusterConfig.label_rules`, plus an optional top-level
-global list applied to every cluster before the per-cluster list).
-
-**Open question**: global rules vs. per-cluster rules both apply in v1, with
-no override semantics between them (global runs first, per-cluster can add
-more matching labels but not suppress a global one) — keep it additive-only
-until there's a concrete need for overrides.
-
-Touches: `app/config.py`, `app/core/` (new module), `app/store/db.py`
-(`LabelRow.source` column — run `task db:revision -- "labelrow source"` to
-generate the migration, see M7), `app/store/repo.py`, `app/store/queries.py`
-(labels reads should probably expose `source` too).

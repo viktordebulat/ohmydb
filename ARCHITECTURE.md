@@ -28,9 +28,9 @@ graph, and serves them over HTTP API and MCP for AI agents.
 
 | Module | Responsibility | Key types/entry points | Depends on |
 |---|---|---|---|
-| `app/core` | DB-agnostic model + sync orchestration | `Entity`, `Edge`, `EntityKind`, `EdgeKind`, `run_sync()` | `app/adapters`, `app/store` |
+| `app/core` | DB-agnostic model + sync orchestration | `Entity`, `Edge`, `EntityKind`, `EdgeKind`, `run_sync()`, `apply_label_rules()` | `app/adapters`, `app/store` |
 | `app/adapters` | DB-specific introspection; ClickHouse is the only impl | `Introspector` protocol, `build_introspector()`, ClickHouse parsing | `app/core` |
-| `app/store` | Persistence: SQLAlchemy models, upsert logic, read queries, schema migrations | `EntityRow`/`EdgeRow`/`LabelRow`, `sync_cluster()`, `graph_payload()`, `get_entity()`, `get_relations()`, `run_migrations()` | `app/core` |
+| `app/store` | Persistence: SQLAlchemy models, upsert logic, read queries, schema migrations | `EntityRow`/`EdgeRow`/`LabelRow`, `sync_cluster()`, `sync_auto_labels()`, `graph_payload()`, `get_entity()`, `get_relations()`, `run_migrations()` | `app/core` |
 | `app/migrations` | Alembic migration scripts, shipped inside the package (not repo-root `alembic/`) so they resolve from a non-editable install too | `env.py`, `versions/*.py` | `app/store` |
 | `app/config.py` | Load `config.yaml` → typed config | `load_config()`, `AppConfig` | — |
 | `app/cli.py` | `ohmydb sync\|serve\|mcp` entry point | `main()` | `app/config`, `app/core`, `app/api`, `app/mcp` |

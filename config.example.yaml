@@ -10,6 +10,16 @@ storage:
   # password: "ohmydb"     # prod: prefer POSTGRES_PASSWORD env over this
   # database: ohmydb
 
+# Optional: auto-derive labels from entity properties during sync (in
+# addition to manual PUT /labels). Applied to every cluster before its own
+# label_rules below (additive). Matchers: engine (exact), kind (exact),
+# name_pattern/database_pattern (regex). All matching rules apply; if two
+# rules set the same key, the last one wins. A manual label for a key always
+# overrides an auto one for that identity.
+# label_rules:
+#   - match: {kind: dictionary}
+#     label: {key: source, value: dictionary}
+
 # Credential env precedence per cluster (highest wins):
 #   CLICKHOUSE_USER__<KEY> / CLICKHOUSE_PASSWORD__<KEY>   (KEY = cluster name,
 #     uppercased, non-alphanumerics -> "_", e.g. "prod-eu" -> "PROD_EU")
@@ -29,3 +39,4 @@ clusters:
     #   verify: false         # skip cert verification
     #   connect_timeout: 30
     #   send_receive_timeout: 300
+    # label_rules: []         # per-cluster, same shape as the global list above
