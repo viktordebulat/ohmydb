@@ -4,7 +4,7 @@ from fastmcp import FastMCP
 
 from app.config import AppConfig
 from app.store.db import make_session_factory
-from app.store.queries import get_entity, get_relations, graph_payload
+from app.store.queries import get_entity, get_relations, graph_payload, list_entities
 
 
 def create_mcp(cfg: AppConfig) -> FastMCP:
@@ -12,12 +12,18 @@ def create_mcp(cfg: AppConfig) -> FastMCP:
     mcp = FastMCP("ohmydb")
 
     @mcp.tool
-    def get_schema_graph() -> dict:
-        """Full catalog graph: nodes (tables, views, materialized views,
-        dictionaries, with labels) and dependency edges (reads_from,
-        writes_to, dict_source)."""
+    def list_clusters() -> list[str]:
+        """Configured cluster names. Call this first — get_schema_graph
+        requires one of these."""
+        return [c.name for c in cfg.clusters]
+
+    @mcp.tool
+    def get_schema_graph(cluster: str) -> dict:
+        """Catalog graph for one cluster: nodes (tables, views, materialized
+        views, dictionaries, with labels) and dependency edges (reads_from,
+        writes_to, dict_source). Call list_clusters() first for valid values."""
         with factory() as s:
-            return graph_payload(s)
+            return graph_payload(s, cluster)
 
     @mcp.tool
     def get_table(cluster: str, database: str, name: str) -> dict:
@@ -31,9 +37,9 @@ def create_mcp(cfg: AppConfig) -> FastMCP:
 
     @mcp.tool
     def get_table_relations(cluster: str, database: str, name: str) -> dict:
-        """All entities related to one table: transitive upstream data sources,
-        transitive downstream consumers (MVs, views, aggregates, dictionaries),
-        and the dependency edges among them."""
+        """All entities related to one table: transitive upstream data sources
+        and transitive downstream consumers (MVs, views, aggregates,
+        dictionaries)."""
         with factory() as s:
             payload = get_relations(s, cluster, database, name)
         if payload is None:
@@ -46,7 +52,7 @@ def create_mcp(cfg: AppConfig) -> FastMCP:
         Returns brief matches (identity + kind + labels)."""
         q = query.lower()
         with factory() as s:
-            nodes = graph_payload(s)["nodes"]
+            nodes = list_entities(s)
         return [
             {k: n[k] for k in ("cluster", "database", "name", "kind", "labels")}
             for n in nodes

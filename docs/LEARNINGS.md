@@ -16,6 +16,20 @@ Gotchas discovered during implementation. Append after each task, then compact
 - clickhouse-connect uses client-side `%(name)s` substitution only when
   `parameters` is non-empty — a literal `%` (e.g. `LIKE '.inner%'`) breaks
   depending on whether params are passed. Avoid `%` in SQL: `startsWith()`.
+- `Merge` engine (unions tables matching a regex over a database) has no
+  statically resolvable target from DDL params — known gap, not parsed.
+- `Distributed(cluster, database, table[, sharding_key])`: `database` param
+  is frequently `currentDatabase()` (a function call, not a literal) or `''`
+  — a naive "stop at first `)`" regex truncates on the nested call's own
+  paren. Parse with a balanced-paren scan instead. Verified against a live
+  25.5 server: `create_table_query` always normalizes args to quoted string
+  literals regardless of how they were written in the original `CREATE`.
+- `WINDOW VIEW` couldn't be verified against a live server: ClickHouse 25.5's
+  default query analyzer rejects the experimental feature outright
+  (`UNSUPPORTED_METHOD`, needs `allow_experimental_analyzer=0`). The
+  `_KIND_BY_ENGINE` mapping itself is a static one-line lookup (no parsing
+  risk), so this was accepted unverified live — flag if upgrading past the
+  engine's experimental phase.
 
 - `/docker-entrypoint-initdb.d` scripts run only on an empty data dir. Seeding
   instead uses a one-shot `clickhouse-init` compose service running
@@ -37,6 +51,13 @@ Gotchas discovered during implementation. Append after each task, then compact
   streamable-http session manager never starts and every `/mcp` call 500s. Probe
   with a POST carrying `Accept: application/json, text/event-stream`; endpoint is
   `/mcp/` (trailing slash). stdio `ohmydb mcp` stays for local-process clients.
+- No Alembic here: adding `EntityRow.upstream`/`downstream` columns needed a
+  `task clean`-equivalent (drop `ohmydb.sqlite` + resync) locally —
+  `Base.metadata.create_all()` only creates missing *tables*, it won't add
+  columns to an existing one. Matches the "latest state only, sync replaces"
+  decision — flagged explicitly rather than adding a migration framework for
+  a non-mission-critical service. Next schema-adding change (e.g. backlog
+  item 3's `LabelRow.source`) hits the same wall.
 
 ## Docker
 
@@ -56,10 +77,13 @@ Gotchas discovered during implementation. Append after each task, then compact
   `--reinstall-package <name>` on the project sync step to force a rebuild.
 - Config not baked into the image: default path resolves `--config` >
   `OHMYDB_CONFIG` env > `config.yaml`; image sets `OHMYDB_CONFIG=/etc/ohmydb/
-  config.yaml` and the config is mounted there. `CLICKHOUSE_USER/PASSWORD` env
-  override per-cluster config (resolved in the CH adapter builder, not core
-  config.py, to keep core db-agnostic). Per-cluster `extra` dict is spread into
-  `clickhouse_connect.get_client(**extra)` for secure/verify/timeout tuning.
+  config.yaml` and the config is mounted there. `CLICKHOUSE_USER/PASSWORD[__KEY]`
+  env override per-cluster config (resolved in the CH adapter builder, not core
+  config.py, to keep core db-agnostic — `cluster_env_key()` sanitization lives
+  next to that lookup; `load_config()` only calls it to fail fast on a
+  collision, e.g. `prod-eu` and `prod_eu` both sanitizing to `PROD_EU`).
+  Per-cluster `extra` dict is spread into `clickhouse_connect.get_client(**extra)`
+  for secure/verify/timeout tuning.
 
 ## Web/UI (removed 2026-07-19, notes kept for future FE work)
 
@@ -74,3 +98,10 @@ Gotchas discovered during implementation. Append after each task, then compact
 
 - colima VM can leave stale disk lock after crash ("in use by instance");
   `colima stop -f` then `colima start` releases it.
+- `uv run <cmd> &` backgrounded then `kill`ed by its captured `$!`: that PID is
+  the `uv run` wrapper, not the actual server process — the child survives
+  and keeps the port bound. Killing left a stale `ohmydb serve` alive on
+  :8080 that silently served pre-change code while a second `serve` failed
+  to bind and exited. Find the real PID via `lsof -i :<port>` (or `pgrep -f`)
+  before trusting `kill $!`, especially when manually re-verifying a change
+  against a live server between edits.

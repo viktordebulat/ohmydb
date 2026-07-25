@@ -3,7 +3,7 @@ import json
 
 from fastmcp import Client
 
-from app.config import AppConfig
+from app.config import AppConfig, ClusterConfig
 from app.core.models import Entity, EntityKind
 from app.mcp import create_mcp
 from app.store.db import make_session_factory
@@ -20,7 +20,8 @@ def _mcp(tmp_path):
             Entity(cluster="c1", database="app", name="users", kind=EntityKind.TABLE),
         ], [])
         set_label(s, "c1", "app", "events", "source", "vector")
-    return create_mcp(AppConfig(storage_url=url, clusters=[]))
+    cfg = AppConfig(storage_url=url, clusters=[ClusterConfig(name="c1", host="localhost")])
+    return create_mcp(cfg)
 
 
 def _payload(result):
@@ -34,7 +35,10 @@ def test_mcp_tools(tmp_path):
 
     async def go():
         async with Client(mcp) as c:
-            graph = _payload(await c.call_tool("get_schema_graph", {}))
+            clusters = _payload(await c.call_tool("list_clusters", {}))
+            assert clusters == ["c1"]
+
+            graph = _payload(await c.call_tool("get_schema_graph", {"cluster": "c1"}))
             assert {n["name"] for n in graph["nodes"]} == {"events", "users"}
 
             detail = _payload(await c.call_tool(

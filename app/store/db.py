@@ -24,6 +24,10 @@ class EntityRow(Base):
     columns: Mapped[list] = mapped_column(JSON, default=list)
     attrs: Mapped[dict] = mapped_column(JSON, default=dict)
     synced_at: Mapped[datetime] = mapped_column(DateTime)
+    # Transitive upstream/downstream entity ids, precomputed at sync time
+    # (see store/repo.py: sync_cluster) so reads are a lookup, not a BFS.
+    upstream: Mapped[list] = mapped_column(JSON, default=list)
+    downstream: Mapped[list] = mapped_column(JSON, default=list)
 
 
 class EdgeRow(Base):
@@ -50,6 +54,10 @@ class LabelRow(Base):
 
 
 def make_session_factory(url: str) -> sessionmaker[Session]:
+    # No migration framework (no Alembic): create_all only creates missing
+    # *tables*, it won't add columns to an existing one. Upgrade path for a
+    # schema change like this is "drop and resync the catalog" (task clean +
+    # resync) — see docs/LEARNINGS.md.
     engine = create_engine(url)
     Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)

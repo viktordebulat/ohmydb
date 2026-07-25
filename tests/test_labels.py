@@ -14,16 +14,16 @@ def test_labels_visible_orphaned_and_revived(tmp_path):
         sync_cluster(s, "c1", [_entity("events")], [])
         set_label(s, "c1", "app", "events", "source", "vector")
 
-        assert graph_payload(s)["nodes"][0]["labels"] == {"source": "vector"}
+        assert graph_payload(s, "c1")["nodes"][0]["labels"] == {"source": "vector"}
         assert get_entity(s, "c1", "app", "events")["labels"] == {"source": "vector"}
 
         # entity dropped -> label orphaned: hidden but not deleted
         sync_cluster(s, "c1", [_entity("other")], [])
-        assert all(n["labels"] == {} for n in graph_payload(s)["nodes"])
+        assert all(n["labels"] == {} for n in graph_payload(s, "c1")["nodes"])
 
         # entity recreated -> label reappears
         sync_cluster(s, "c1", [_entity("events")], [])
-        assert graph_payload(s)["nodes"][0]["labels"] == {"source": "vector"}
+        assert graph_payload(s, "c1")["nodes"][0]["labels"] == {"source": "vector"}
 
 
 def test_set_overwrites_and_delete(tmp_path):

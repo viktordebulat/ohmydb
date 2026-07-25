@@ -41,7 +41,6 @@ def test_transitive_downstream_and_upstream(tmp_path):
         rel = get_relations(s, "c1", "app", "raw")
         assert rel["upstream"] == []
         assert [d["name"] for d in rel["downstream"]] == ["agg", "mv", "view"]
-        assert len(rel["edges"]) == 3  # dict/users edge excluded
 
         rel = get_relations(s, "c1", "an", "agg")
         assert {u["name"] for u in rel["upstream"]} == {"mv", "raw"}
@@ -54,5 +53,4 @@ def test_unrelated_and_missing(tmp_path):
         rel = get_relations(s, "c1", "app", "users")
         assert rel["upstream"] == []
         assert [d["name"] for d in rel["downstream"]] == ["dict"]
-        assert rel["edges"] == [{"src": "c1/app/dict", "dst": "c1/app/users", "kind": "dict_source"}]
         assert get_relations(s, "c1", "app", "nope") is None

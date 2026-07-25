@@ -17,25 +17,45 @@ def _labels_for(session: Session, rows: list[EntityRow]) -> dict[tuple, dict]:
     return out
 
 
-def graph_payload(session: Session) -> dict:
-    entities = session.scalars(select(EntityRow)).all()
-    edges = session.scalars(select(EdgeRow)).all()
+def _node_briefs(session: Session, entities: list[EntityRow]) -> list[dict]:
     labels = _labels_for(session, entities)
+    return [
+        {
+            "id": e.id,
+            "cluster": e.cluster,
+            "database": e.database,
+            "name": e.name,
+            "kind": e.kind,
+            "engine": e.engine,
+            "refreshable": bool((e.attrs or {}).get("refreshable")),
+            "labels": labels.get((e.cluster, e.database, e.name), {}),
+        }
+        for e in entities
+    ]
+
+
+def list_entities(session: Session, cluster: str | None = None) -> list[dict]:
+    """Node listing, no edges — used by search (find_tables) which scans
+    across all clusters and doesn't need the full graph."""
+    stmt = select(EntityRow)
+    if cluster is not None:
+        stmt = stmt.where(EntityRow.cluster == cluster)
+    entities = session.scalars(stmt).all()
+    return _node_briefs(session, entities)
+
+
+def graph_payload(session: Session, cluster: str) -> dict:
+    entities = session.scalars(select(EntityRow).where(EntityRow.cluster == cluster)).all()
+    edges = session.scalars(
+        select(EdgeRow).join(EntityRow, EdgeRow.src_id == EntityRow.id)
+        .where(EntityRow.cluster == cluster)
+    ).all()
+    # One value for the whole graph, not per node — a sync writes the same
+    # timestamp to every entity of a cluster in one transaction.
+    synced_at = max((e.synced_at for e in entities if e.synced_at), default=None)
     return {
-        "nodes": [
-            {
-                "id": e.id,
-                "cluster": e.cluster,
-                "database": e.database,
-                "name": e.name,
-                "kind": e.kind,
-                "engine": e.engine,
-                "refreshable": bool((e.attrs or {}).get("refreshable")),
-                "labels": labels.get((e.cluster, e.database, e.name), {}),
-                "synced_at": e.synced_at.isoformat() if e.synced_at else None,
-            }
-            for e in entities
-        ],
+        "synced_at": synced_at.isoformat() if synced_at else None,
+        "nodes": _node_briefs(session, entities),
         "edges": [{"src": e.src_id, "dst": e.dst_id, "kind": e.kind} for e in edges],
     }
 
@@ -67,10 +87,12 @@ def get_entity(session: Session, cluster: str, database: str, name: str) -> dict
 
 def get_relations(session: Session, cluster: str, database: str, name: str) -> dict | None:
     """All entities related to one entity: transitive upstream (data sources)
-    and downstream (consumers), plus the dependency edges among them.
+    and downstream (consumers). No separate edges list — membership in
+    upstream/downstream already implies the dependency direction (writes_to
+    and reads_from/dict_source both fold into these two sets at sync time).
 
-    Stored edges are dependency-direction; here they are walked in data-flow
-    direction: writes_to flows src→dst, reads_from/dict_source flow dst→src.
+    upstream/downstream are precomputed at sync time (store/repo.py:
+    sync_cluster) — this is a lookup + label join, not a graph walk.
     """
     target = session.scalar(
         select(EntityRow).where(
@@ -82,32 +104,10 @@ def get_relations(session: Session, cluster: str, database: str, name: str) -> d
     if target is None:
         return None
 
-    entities = session.scalars(select(EntityRow)).all()
-    edges = session.scalars(select(EdgeRow)).all()
-    by_id = {r.id: r for r in entities}
-
-    flow_out: dict[int, set[int]] = {}  # data flows from key to values
-    flow_in: dict[int, set[int]] = {}
-    for e in edges:
-        frm, to = (e.src_id, e.dst_id) if e.kind == "writes_to" else (e.dst_id, e.src_id)
-        flow_out.setdefault(frm, set()).add(to)
-        flow_in.setdefault(to, set()).add(frm)
-
-    def reachable(adj: dict[int, set[int]], start: int) -> set[int]:
-        seen: set[int] = set()
-        stack = [start]
-        while stack:
-            for nxt in adj.get(stack.pop(), ()):
-                if nxt != start and nxt not in seen:
-                    seen.add(nxt)
-                    stack.append(nxt)
-        return seen
-
-    upstream = reachable(flow_in, target.id)
-    downstream = reachable(flow_out, target.id)
-    keep = upstream | downstream | {target.id}
-
-    labels = _labels_for(session, [by_id[i] for i in keep])
+    keep = set(target.upstream) | set(target.downstream) | {target.id}
+    rows = session.scalars(select(EntityRow).where(EntityRow.id.in_(keep))).all()
+    by_id = {r.id: r for r in rows}
+    labels = _labels_for(session, rows)
 
     def brief(r: EntityRow) -> dict:
         return {
@@ -119,19 +119,11 @@ def get_relations(session: Session, cluster: str, database: str, name: str) -> d
             "labels": labels.get((r.cluster, r.database, r.name), {}),
         }
 
-    def ident(r: EntityRow) -> str:
-        return f"{r.cluster}/{r.database}/{r.name}"
-
     order = lambda i: (by_id[i].cluster, by_id[i].database, by_id[i].name)  # noqa: E731
     return {
         "entity": brief(target),
-        "upstream": [brief(by_id[i]) for i in sorted(upstream, key=order)],
-        "downstream": [brief(by_id[i]) for i in sorted(downstream, key=order)],
-        "edges": [
-            {"src": ident(by_id[e.src_id]), "dst": ident(by_id[e.dst_id]), "kind": e.kind}
-            for e in edges
-            if e.src_id in keep and e.dst_id in keep
-        ],
+        "upstream": [brief(by_id[i]) for i in sorted(target.upstream, key=order)],
+        "downstream": [brief(by_id[i]) for i in sorted(target.downstream, key=order)],
     }
 
 
