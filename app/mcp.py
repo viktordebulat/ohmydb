@@ -19,9 +19,10 @@ def create_mcp(cfg: AppConfig) -> FastMCP:
 
     @mcp.tool
     def get_schema_graph(cluster: str) -> dict:
-        """Catalog graph for one cluster: nodes (tables, views, materialized
-        views, dictionaries, with labels) and dependency edges (reads_from,
-        writes_to, dict_source). Call list_clusters() first for valid values."""
+        """Catalog nodes for one cluster: tables, views, materialized views,
+        dictionaries, with labels. No dependency edges — call
+        get_table_relations for one entity's upstream/downstream. Call
+        list_clusters() first for valid values."""
         with factory() as s:
             return graph_payload(s, cluster)
 
