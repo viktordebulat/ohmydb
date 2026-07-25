@@ -65,6 +65,12 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   sqlite file via `make_session_factory`, wrote a scratch "add a column"
   migration, re-opened the same file, and confirmed the new column existed
   *and* the seeded row survived — the thing `create_all` could never do.
+- **M8 (2026-07-25)**: `graph_payload` (`GET /graph/{cluster}`, MCP
+  `get_schema_graph`) dropped its `edges` list — same redundancy already
+  resolved for `get_relations` in M5: an entity's dependency direction is
+  fully captured by its own `upstream`/`downstream` fields, so a caller
+  needing that for one entity should call `get_table_relations` instead of
+  walking a graph-wide edge list. `/graph` now returns node briefs only.
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,

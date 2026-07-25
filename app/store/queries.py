@@ -4,7 +4,7 @@ entity) are excluded from all reads but kept in the table."""
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.store.db import EdgeRow, EntityRow, LabelRow
+from app.store.db import EntityRow, LabelRow
 
 
 def _labels_for(session: Session, rows: list[EntityRow]) -> dict[tuple, dict]:
@@ -45,18 +45,16 @@ def list_entities(session: Session, cluster: str | None = None) -> list[dict]:
 
 
 def graph_payload(session: Session, cluster: str) -> dict:
+    # No edges list — redundant with per-entity upstream/downstream
+    # (see get_relations); a caller wanting dependency direction for one
+    # entity should call that instead of walking edges here.
     entities = session.scalars(select(EntityRow).where(EntityRow.cluster == cluster)).all()
-    edges = session.scalars(
-        select(EdgeRow).join(EntityRow, EdgeRow.src_id == EntityRow.id)
-        .where(EntityRow.cluster == cluster)
-    ).all()
     # One value for the whole graph, not per node — a sync writes the same
     # timestamp to every entity of a cluster in one transaction.
     synced_at = max((e.synced_at for e in entities if e.synced_at), default=None)
     return {
         "synced_at": synced_at.isoformat() if synced_at else None,
         "nodes": _node_briefs(session, entities),
-        "edges": [{"src": e.src_id, "dst": e.dst_id, "kind": e.kind} for e in edges],
     }
 
 

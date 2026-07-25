@@ -29,8 +29,6 @@ def test_graph(tmp_path):
     g = _client(tmp_path).get("/graph/c1").json()
     assert g["synced_at"]
     assert {n["name"] for n in g["nodes"]} == {"events", "mv"}
-    assert len(g["edges"]) == 1
-    assert g["edges"][0]["kind"] == "reads_from"
     node = next(n for n in g["nodes"] if n["name"] == "events")
     assert node["kind"] == "table" and "synced_at" not in node
 
