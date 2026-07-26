@@ -60,7 +60,12 @@ task mcp     # MCP server over stdio (alternative to the HTTP /mcp mount)
 task test    # tests; integration auto-skips without ClickHouse
 task check   # tests + docs:verify (ARCHITECTURE.md drift check) — source of truth for "is it green"
 task down    # stop containers   (task clean: also drop volumes + catalog)
+task db:revision -- "message"  # autogenerate Alembic migration from db.py model changes
 ```
+
+Prefer `task <name>` over the raw command behind it (e.g. `task db:revision` not
+`uv run alembic revision --autogenerate`) — tasks wrap the right flags/env for
+this repo.
 
 Raw commands behind the tasks: `uv sync`, `docker compose up -d --wait clickhouse`,
 `docker compose run --rm clickhouse-init`, `uv run ohmydb sync|serve|mcp`,

@@ -127,9 +127,9 @@ class ClickHouseIntrospector:
         def add_edge(src: tuple[str, str], dst: tuple[str, str], kind: EdgeKind):
             edge_set.add(((self.cluster, *src), (self.cluster, *dst), kind))
 
-        for db, name, engine, ddl, dep_dbs, dep_tables in client.query(
-            f"""SELECT database, name, engine, create_table_query,
-                       dependencies_database, dependencies_table
+        for db, name, engine, engine_full, sorting_key, primary_key, ddl, dep_dbs, dep_tables in client.query(
+            f"""SELECT database, name, engine, engine_full, sorting_key, primary_key,
+                       create_table_query, dependencies_database, dependencies_table
                 FROM system.tables
                 WHERE database NOT IN {SYSTEM_DBS} AND NOT startsWith(name, '.inner') {db_filter}""",
             parameters=params,
@@ -163,7 +163,8 @@ class ClickHouseIntrospector:
                 add_edge((dep_db, dep_table), (db, name), EdgeKind.READS_FROM)
             entities.append(Entity(
                 cluster=self.cluster, database=db, name=name, kind=kind,
-                engine=engine, ddl=ddl, columns=columns.get((db, name), []),
+                engine=engine, engine_full=engine_full, sorting_key=sorting_key,
+                primary_key=primary_key, ddl=ddl, columns=columns.get((db, name), []),
                 attrs=attrs,
             ))
 
