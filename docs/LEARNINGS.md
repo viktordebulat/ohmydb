@@ -81,6 +81,12 @@ Gotchas discovered during implementation. Append after each task, then compact
     (new rows only) and existing rows get `NULL` from a bare `ALTER TABLE
     ADD COLUMN` otherwise. Autogenerate only emits `server_default` in the
     migration if it's present on the model.
+- Array-of-arrays MCP tool output (M10, `get_schema_graph`/`find_tables`):
+  fastmcp's auto schema requires the return to be an object, so wrap as
+  `{columns, rows}` rather than a bare list — no `output_schema=None` needed.
+  Do the dict-to-row transform only in the MCP tool function, not in the
+  shared `store/queries.py` helper it calls — that helper also backs a plain
+  HTTP endpoint, which has no reason to lose its self-describing dict shape.
 - `label_rules` `match` dict originally checked only known keys
   (`engine`/`kind`/`name_pattern`/`database_pattern`) and ignored anything
   else — a real user config used `name` (not `name_pattern`), which silently
