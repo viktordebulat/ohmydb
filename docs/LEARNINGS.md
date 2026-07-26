@@ -81,6 +81,13 @@ Gotchas discovered during implementation. Append after each task, then compact
     (new rows only) and existing rows get `NULL` from a bare `ALTER TABLE
     ADD COLUMN` otherwise. Autogenerate only emits `server_default` in the
     migration if it's present on the model.
+- `label_rules` `match` dict originally checked only known keys
+  (`engine`/`kind`/`name_pattern`/`database_pattern`) and ignored anything
+  else — a real user config used `name` (not `name_pattern`), which silently
+  produced an empty condition set and matched every entity in the cluster.
+  Fixed by validating match keys at config load (`app/core/labeling.py:
+  validate_label_rules`, called from `load_config`) so a typo'd key raises
+  before sync ever runs, not a silently-wrong result discovered in output.
 
 ## Docker
 

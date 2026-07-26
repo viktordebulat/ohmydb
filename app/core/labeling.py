@@ -5,6 +5,20 @@ import re
 
 from app.core.models import Entity, Identity
 
+_VALID_MATCH_KEYS = {"engine", "kind", "name_pattern", "database_pattern"}
+
+
+def validate_label_rules(rules: list[dict]) -> None:
+    """Fail loud on a typo'd/unsupported match key — silently ignoring it
+    would make the rule match every entity instead of the intended few."""
+    for rule in rules:
+        unknown = set(rule.get("match", {})) - _VALID_MATCH_KEYS
+        if unknown:
+            raise ValueError(
+                f"label_rules: unknown match key(s) {sorted(unknown)} in {rule!r} "
+                f"— valid keys: {sorted(_VALID_MATCH_KEYS)}"
+            )
+
 
 def _matches(entity: Entity, match: dict) -> bool:
     if "engine" in match and entity.engine != match["engine"]:

@@ -1,4 +1,6 @@
-from app.core.labeling import apply_label_rules
+import pytest
+
+from app.core.labeling import apply_label_rules, validate_label_rules
 from app.core.models import Entity, EntityKind
 from app.store.db import LabelRow, make_session_factory
 from app.store.queries import set_label
@@ -8,6 +10,18 @@ from sqlalchemy import select
 
 def _entity(db, name, kind=EntityKind.TABLE, engine=""):
     return Entity(cluster="c1", database=db, name=name, kind=kind, engine=engine)
+
+
+def test_validate_label_rules_rejects_unknown_match_key():
+    with pytest.raises(ValueError, match="name"):
+        validate_label_rules([{"match": {"name": "events"}, "label": {"key": "a", "value": "b"}}])
+
+
+def test_validate_label_rules_accepts_known_keys():
+    validate_label_rules([
+        {"match": {"engine": "Kafka", "kind": "table", "name_pattern": "x", "database_pattern": "y"},
+         "label": {"key": "a", "value": "b"}},
+    ])
 
 
 def test_apply_label_rules_matches_and_accumulates():
