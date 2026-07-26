@@ -43,3 +43,20 @@ clusters:
     assert cfg.clusters[0].label_rules == [
         {"match": {"engine": "Kafka"}, "label": {"key": "source", "value": "streaming"}}
     ]
+
+
+def test_load_config_rejects_unknown_label_rule_match_key(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("""
+storage:
+  type: sqlite
+  url: sqlite:///x.sqlite
+label_rules:
+  - match: {name: events}
+    label: {key: a, value: b}
+clusters:
+  - name: prod
+    host: localhost
+""")
+    with pytest.raises(ValueError, match="unknown match key"):
+        load_config(path)

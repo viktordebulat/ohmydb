@@ -60,13 +60,19 @@ class AppConfig:
 
 
 def load_config(path: str | Path) -> AppConfig:
+    from app.core.labeling import validate_label_rules
+
     raw = yaml.safe_load(Path(path).read_text())
     clusters = [ClusterConfig(**c) for c in raw["clusters"]]
     _check_cluster_key_collisions(clusters)
+    label_rules = raw.get("label_rules", [])
+    validate_label_rules(label_rules)
+    for c in clusters:
+        validate_label_rules(c.label_rules)
     return AppConfig(
         storage_url=StorageConfig(**raw["storage"]).resolve_url(),
         clusters=clusters,
-        label_rules=raw.get("label_rules", []),
+        label_rules=label_rules,
     )
 
 
