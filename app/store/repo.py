@@ -50,6 +50,9 @@ def sync_cluster(session: Session, cluster: str, entities: list[Entity], edges: 
             updated += 1
         row.kind = ent.kind.value
         row.engine = ent.engine
+        row.engine_full = ent.engine_full
+        row.sorting_key = ent.sorting_key
+        row.primary_key = ent.primary_key
         row.ddl = ent.ddl
         row.columns = [asdict(c) for c in ent.columns]
         row.attrs = ent.attrs

@@ -37,6 +37,9 @@ class Entity:
     name: str
     kind: EntityKind
     engine: str = ""
+    engine_full: str = ""
+    sorting_key: str = ""
+    primary_key: str = ""
     ddl: str = ""
     columns: list[Column] = field(default_factory=list)
     attrs: dict = field(default_factory=dict)
