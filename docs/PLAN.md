@@ -111,8 +111,27 @@ non-obvious parts. This doc stays forward-looking from here down.
 
 ## Backlog
 
-Empty — see M10 for the last item resolved (array/CSV encoding for
-`get_schema_graph`/`find_tables`).
+- **Auth for API/MCP (optional)**: opt-in auth (e.g. bearer token via config)
+  guarding mutating endpoints (`POST /sync`, `PUT`/`DELETE /labels`) and
+  reads. Off by default — most deployments are localhost-only; a config flag
+  turns it on for anything exposed past that.
+- **`find_tables` scale**: `app/mcp.py: find_tables` loads every entity
+  across all clusters into memory and substring-filters in Python, no
+  limit/pagination. Fine at current catalog size; add a result limit (and
+  maybe cluster-scoping) once it isn't.
+- **`Merge` engine edges**: `Merge(db, regex)` has no statically resolvable
+  target from DDL params (known gap, see LEARNINGS.md). Resolve the regex
+  against catalog tables at sync time to emit best-effort `reads_from` edges.
+- **Sync scheduler (config-gated)**: optional periodic re-sync (interval in
+  config), off by default — current model is CLI/POST-triggered only
+  (locked decision above). Lets the catalog stay fresh without relying on an
+  external cron/CI trigger being wired up.
+- **Observability**: structured logging + basic metrics around sync
+  (duration, per-cluster success/failure) and API/MCP calls. Right now a
+  sync failure only surfaces as `str(e)` in the `/sync` HTTP response — no
+  visibility if nothing is actively calling it.
 
-Touches: `app/mcp.py` only (see above — not `graph_payload`).
+Touches for the last resolved item (M10, array/CSV encoding for
+`get_schema_graph`/`find_tables`): `app/mcp.py` only (see above — not
+`graph_payload`).
 
