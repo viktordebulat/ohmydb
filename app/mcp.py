@@ -22,9 +22,21 @@ def create_mcp(cfg: AppConfig) -> FastMCP:
         """Catalog nodes for one cluster: tables, views, materialized views,
         dictionaries, with labels. No dependency edges — call
         get_table_relations for one entity's upstream/downstream. Call
-        list_clusters() first for valid values."""
+        list_clusters() first for valid values.
+
+        Rows encoded as `columns` + `rows` (array-of-arrays) instead of one
+        dict per node, to cut repeated key names at scale — zip(columns, row)
+        to get a node dict back. `cluster`/`id` are omitted per row: cluster
+        is the argument you just passed, id has no meaning to any other tool
+        (all lookups are by cluster/database/name)."""
         with factory() as s:
-            return graph_payload(s, cluster)
+            payload = graph_payload(s, cluster)
+        columns = ["database", "name", "kind", "engine", "refreshable", "labels"]
+        return {
+            "synced_at": payload["synced_at"],
+            "columns": columns,
+            "rows": [[n[c] for c in columns] for n in payload["nodes"]],
+        }
 
     @mcp.tool
     def get_table(cluster: str, database: str, name: str) -> dict:
@@ -48,18 +60,25 @@ def create_mcp(cfg: AppConfig) -> FastMCP:
         return payload
 
     @mcp.tool
-    def find_tables(query: str) -> list[dict]:
-        """Search entities by substring of name, database, or label value.
-        Returns brief matches (identity + kind + labels)."""
+    def find_tables(query: str) -> dict:
+        """Search entities by substring of name, database, or label value,
+        across all clusters. Rows encoded as `columns` + `rows`
+        (array-of-arrays) instead of one dict per match, to cut repeated key
+        names at scale — zip(columns, row) to get a match dict back."""
         q = query.lower()
         with factory() as s:
             nodes = list_entities(s)
-        return [
-            {k: n[k] for k in ("cluster", "database", "name", "kind", "labels")}
+        matches = [
+            n
             for n in nodes
             if q in n["name"].lower()
             or q in n["database"].lower()
             or any(q in v.lower() or q in k.lower() for k, v in n["labels"].items())
         ]
+        columns = ["cluster", "database", "name", "kind", "labels"]
+        return {
+            "columns": columns,
+            "rows": [[n[c] for c in columns] for n in matches],
+        }
 
     return mcp

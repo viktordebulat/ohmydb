@@ -39,14 +39,16 @@ def test_mcp_tools(tmp_path):
             assert clusters == ["c1"]
 
             graph = _payload(await c.call_tool("get_schema_graph", {"cluster": "c1"}))
-            assert {n["name"] for n in graph["nodes"]} == {"events", "users"}
+            names_idx = graph["columns"].index("name")
+            assert {row[names_idx] for row in graph["rows"]} == {"events", "users"}
 
             detail = _payload(await c.call_tool(
                 "get_table", {"cluster": "c1", "database": "app", "name": "events"}))
             assert detail["labels"] == {"source": "vector"}
 
             found = _payload(await c.call_tool("find_tables", {"query": "vector"}))
-            assert [f["name"] for f in found] == ["events"]
+            name_idx = found["columns"].index("name")
+            assert [row[name_idx] for row in found["rows"]] == ["events"]
 
             rel = _payload(await c.call_tool(
                 "get_table_relations", {"cluster": "c1", "database": "app", "name": "events"}))

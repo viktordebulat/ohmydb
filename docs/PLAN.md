@@ -71,6 +71,18 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   fully captured by its own `upstream`/`downstream` fields, so a caller
   needing that for one entity should call `get_table_relations` instead of
   walking a graph-wide edge list. `/graph` now returns node briefs only.
+- **M10 (2026-07-26)**: MCP token-cost reduction. `get_schema_graph` and
+  `find_tables` (`app/mcp.py`) now return `{columns, rows}` (array-of-arrays)
+  instead of one dict per node/match — cuts repeated key-name tokens at scale
+  (confirmed no external consumers of the old dict-keyed shape, so no
+  versioning needed). `get_schema_graph` additionally drops `cluster` (the
+  caller already passed it — same redundancy class as M5's `synced_at` hoist)
+  and `id` (internal PK, meaningless to any tool — all lookups go by
+  cluster/database/name) from each row. Transform lives only in the MCP
+  wrapper, not `graph_payload`/`list_entities`, which still back plain HTTP
+  with self-describing dicts. `get_table_relations` left as-is — its
+  upstream/downstream lists are small in practice, not the hundreds-scale
+  case this was gated on.
 - **M9 (2026-07-25)**: config-driven auto-labeling. New optional
   `label_rules` config key, global (`AppConfig.label_rules`) and per-cluster
   (`ClusterConfig.label_rules`), matched via `app/core/labeling.py:
@@ -99,36 +111,8 @@ non-obvious parts. This doc stays forward-looking from here down.
 
 ## Backlog
 
-Each entry below is written to be picked up by another agent with no other
-context than this repo. Where a design decision is genuinely open, a
-recommendation is given — take it unless you find a concrete reason not to.
-
-### 1. Array/CSV encoding for `get_schema_graph` (MCP token cost, on hold)
-
-Deferred from M5's cluster-scoping work (see LEARNINGS.md "Stack" for the
-rest of that token-cost research — typed returns don't shrink payload size,
-no MCP-protocol pagination exists for tool *results*, only for
-`list_tools`/`list_resources`).
-
-**Entity-count gate is now satisfied**: production clusters expect 200+
-tables across 2 clusters, each with multiple upstream/downstream deps — the
-hundreds+ threshold this item was waiting on. **But a second, harder blocker
-surfaced on review (2026-07-25) and isn't resolved**: other agents/clients
-may already depend on `get_schema_graph`'s current dict-keyed node shape.
-Positional array encoding is a breaking wire-format change for anyone already
-integrated — swapping it silently risks correctness (silent misread of a
-shifted column) for consumers we don't control, not just a client-side
-update. Before picking this up: identify who/what currently calls
-`get_schema_graph` in practice, and design either a versioned/opt-in tool
-variant or confirm there are no external consumers yet. Don't just re-check
-entity counts and proceed — that gate is cleared, this one isn't.
-
-Also still true: array-of-arrays/CSV-style encoding needs `output_schema=None`
-or a `{columns, rows}` wrapper since fastmcp's auto schema requires an object.
-Apply the transform only in the MCP wrapper (`app/mcp.py`), not inside
-`graph_payload()` itself — that function also backs `GET /graph/{cluster}`
-over plain HTTP, which has no token-cost reason to lose its self-describing
-dict shape.
+Empty — see M10 for the last item resolved (array/CSV encoding for
+`get_schema_graph`/`find_tables`).
 
 Touches: `app/mcp.py` only (see above — not `graph_payload`).
 
