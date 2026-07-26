@@ -13,9 +13,9 @@ The catalog is exposed as an MCP server at `/mcp/`:
   "mcpServers": {
     "ohmydb-dev": {
       "type": "http",
-      "url": "https://ohmydb.dev.proxylive.tech/mcp/",
+      "url": "{{YOUR_HOST_HERE}}/mcp/",
       "headers": {
-        "Authorization": "PUT YOUR AUTHORIZATION TOKEN HERE"
+        "Authorization": "{{PUT YOUR AUTHORIZATION TOKEN HERE}}"
       }
     }
   }
