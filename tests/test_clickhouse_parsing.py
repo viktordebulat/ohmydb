@@ -1,5 +1,6 @@
 from app.adapters.clickhouse import (
     _EXTERNAL_ENGINES,
+    _extract_dict_gets,
     _extract_sources,
     _extract_to_target,
     _KIND_BY_ENGINE,
@@ -47,6 +48,26 @@ def test_parse_dict_source_defaults_db():
 def test_parse_dict_source_non_clickhouse():
     ddl = "CREATE DICTIONARY app.d (`id` UInt64) PRIMARY KEY id SOURCE(MYSQL(TABLE 'users')) LAYOUT(FLAT())"
     assert _parse_dict_source(ddl, "app") is None
+
+
+def test_extract_dict_gets_qualified():
+    ddl = "CREATE VIEW v AS SELECT dictGetOrDefault('app.d1', 'name', id, '') AS name FROM app.t"
+    assert _extract_dict_gets(ddl, "other") == [("app", "d1")]
+
+
+def test_extract_dict_gets_unqualified_uses_default_db():
+    ddl = "CREATE VIEW v AS SELECT dictGet('d1', 'name', id) AS name FROM app.t"
+    assert _extract_dict_gets(ddl, "app") == [("app", "d1")]
+
+
+def test_extract_dict_gets_multiple():
+    ddl = ("CREATE VIEW v AS SELECT dictGetOrDefault('app.d1', 'a', id, '') AS a, "
+           "dictGet('app.d2', 'b', id) AS b FROM app.t")
+    assert _extract_dict_gets(ddl, "app") == [("app", "d1"), ("app", "d2")]
+
+
+def test_extract_dict_gets_none():
+    assert _extract_dict_gets("CREATE VIEW v AS SELECT * FROM app.t", "app") == []
 
 
 def test_window_and_live_view_map_to_view():

@@ -72,6 +72,18 @@ def _extract_sources(ddl: str) -> list[tuple[str, str]]:
     return re.findall(r"\b(?:FROM|JOIN)\s+`?(\w+)`?\.`?(\w+)`?", ddl, flags=re.IGNORECASE)
 
 
+def _extract_dict_gets(ddl: str, default_db: str) -> list[tuple[str, str]]:
+    """Dictionaries referenced via dictGet*('db.dict' | 'dict', ...) calls.
+    Not covered by dependencies_database/table: CH's dependency graph doesn't
+    scan plain View bodies for dictGet targets (only load-order-sensitive
+    cases like MV/column defaults)."""
+    refs = []
+    for ref in re.findall(r"\bdictGet\w*\(\s*'([^']+)'", ddl, flags=re.IGNORECASE):
+        db, _, dict_name = ref.rpartition(".")
+        refs.append((db or default_db, dict_name))
+    return refs
+
+
 def _parse_dict_source(ddl: str, default_db: str) -> tuple[str, str] | None:
     """ClickHouse-backed source from dictionary DDL:
     SOURCE(CLICKHOUSE(DB 'app' TABLE 'users')). system.dictionaries.source is
@@ -152,6 +164,8 @@ class ClickHouseIntrospector:
                 # and refreshable MVs (no insert trigger).
                 for src_db, src_table in _extract_sources(ddl):
                     add_edge((db, name), (src_db, src_table), EdgeKind.READS_FROM)
+                for dict_db, dict_name in _extract_dict_gets(ddl, db):
+                    add_edge((db, name), (dict_db, dict_name), EdgeKind.READS_FROM)
             if engine == "Distributed":
                 target = _parse_distributed_target(ddl, db)
                 if target:
