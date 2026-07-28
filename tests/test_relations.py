@@ -47,6 +47,20 @@ def test_transitive_downstream_and_upstream(tmp_path):
         assert {d["name"] for d in rel["downstream"]} == {"view"}
 
 
+def test_direct_flag_marks_one_hop_neighbors(tmp_path):
+    factory = _setup(tmp_path)
+    with factory() as s:
+        rel = get_relations(s, "c1", "app", "raw")
+        by_name = {d["name"]: d["direct"] for d in rel["downstream"]}
+        assert by_name == {"mv": True, "agg": False, "view": False}
+
+        rel = get_relations(s, "c1", "an", "agg")
+        by_name = {u["name"]: u["direct"] for u in rel["upstream"]}
+        assert by_name == {"mv": True, "raw": False}
+        by_name = {d["name"]: d["direct"] for d in rel["downstream"]}
+        assert by_name == {"view": True}
+
+
 def test_unrelated_and_missing(tmp_path):
     factory = _setup(tmp_path)
     with factory() as s:
