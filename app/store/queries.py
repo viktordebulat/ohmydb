@@ -1,10 +1,11 @@
 """Read/label helpers shared by API and MCP. Orphan labels (no matching
 entity) are excluded from all reads but kept in the table."""
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
-from app.store.db import EntityRow, LabelRow
+from app.core.models import EdgeKind
+from app.store.db import EdgeRow, EntityRow, LabelRow
 
 
 def _labels_for(session: Session, rows: list[EntityRow]) -> dict[tuple, dict]:
@@ -91,6 +92,8 @@ def get_relations(session: Session, cluster: str, database: str, name: str) -> d
     and downstream (consumers). No separate edges list — membership in
     upstream/downstream already implies the dependency direction (writes_to
     and reads_from/dict_source both fold into these two sets at sync time).
+    Each entry is also flagged `direct` (immediate 1-hop neighbor vs reached
+    through an intermediate) by checking this entity's own edges.
 
     upstream/downstream are precomputed at sync time (store/repo.py:
     sync_cluster) — this is a lookup + label join, not a graph walk.
@@ -110,7 +113,22 @@ def get_relations(session: Session, cluster: str, database: str, name: str) -> d
     by_id = {r.id: r for r in rows}
     labels = _labels_for(session, rows)
 
-    def brief(r: EntityRow) -> dict:
+    # Direct (1-hop) neighbors: this entity's own edges, same direction
+    # convention as repo.py's flow_out/flow_in (writes_to flows src->dst,
+    # reads_from/dict_source flow dst->src).
+    direct_upstream: set[int] = set()
+    direct_downstream: set[int] = set()
+    own_edges = session.scalars(
+        select(EdgeRow).where(or_(EdgeRow.src_id == target.id, EdgeRow.dst_id == target.id))
+    ).all()
+    for e in own_edges:
+        frm, to = (e.src_id, e.dst_id) if e.kind == EdgeKind.WRITES_TO.value else (e.dst_id, e.src_id)
+        if frm == target.id:
+            direct_downstream.add(to)
+        if to == target.id:
+            direct_upstream.add(frm)
+
+    def brief(r: EntityRow, direct_ids: set[int]) -> dict:
         return {
             "cluster": r.cluster,
             "database": r.database,
@@ -118,13 +136,14 @@ def get_relations(session: Session, cluster: str, database: str, name: str) -> d
             "kind": r.kind,
             "engine": r.engine,
             "labels": labels.get((r.cluster, r.database, r.name), {}),
+            "direct": r.id in direct_ids,
         }
 
     order = lambda i: (by_id[i].cluster, by_id[i].database, by_id[i].name)  # noqa: E731
     return {
-        "entity": brief(target),
-        "upstream": [brief(by_id[i]) for i in sorted(target.upstream, key=order)],
-        "downstream": [brief(by_id[i]) for i in sorted(target.downstream, key=order)],
+        "entity": brief(target, set()),
+        "upstream": [brief(by_id[i], direct_upstream) for i in sorted(target.upstream, key=order)],
+        "downstream": [brief(by_id[i], direct_downstream) for i in sorted(target.downstream, key=order)],
     }
 
 
