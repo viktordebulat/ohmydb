@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oh-my-db — schema catalog</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --page: #f9f9f7;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --border: rgba(11, 11, 11, 0.10);
+    --accent: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface: #1a1a19;
+      --page: #0d0d0d;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --border: rgba(255, 255, 255, 0.10);
+      --accent: #3987e5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+    background: var(--page); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 10px 16px; border-bottom: 1px solid var(--grid); background: var(--surface);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 650; }
+  header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+  select, input[type=text], button {
+    padding: 5px 9px; border: 1px solid var(--grid); border-radius: 6px;
+    background: var(--page); color: var(--ink); font: inherit; font-size: 12.5px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  #filters {
+    display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap;
+    padding: 12px 16px; border-bottom: 1px solid var(--grid); background: var(--surface);
+  }
+  .field { display: flex; flex-direction: column; gap: 3px; }
+  .field label { font-size: 11px; color: var(--muted); }
+  #label-rows { display: flex; flex-direction: column; gap: 6px; }
+  .label-row { display: flex; gap: 6px; align-items: center; }
+  .label-row input { width: 110px; }
+  .label-row button { padding: 3px 8px; }
+  #label-add { padding: 3px 8px; }
+  main { flex: 1; padding: 12px 16px; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grid); }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--surface); }
+  tbody tr.selected { background: var(--border); }
+  .chip {
+    display: inline-flex; align-items: center; gap: 3px; margin: 0 4px 2px 0;
+    padding: 1px 7px; border: 1px solid var(--border); border-radius: 9px;
+    font-size: 11px; color: var(--ink-2); background: var(--page);
+  }
+  #status { color: var(--muted); font-size: 12px; padding: 4px 2px; }
+  #detail {
+    margin-top: 14px; padding: 10px 12px; border: 1px solid var(--grid); border-radius: 8px;
+    background: var(--surface); font-size: 12.5px; color: var(--ink-2); display: none;
+  }
+  #detail.open { display: block; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>oh-my-db</h1>
+  <div class="field">
+    <label for="cluster">cluster</label>
+    <select id="cluster"></select>
+  </div>
+  <button id="refresh">refresh</button>
+  <span class="sub" id="synced-at"></span>
+</header>
+
+<div id="filters">
+  <div class="field">
+    <label for="f-database">database</label>
+    <select id="f-database"><option value="">all</option></select>
+  </div>
+  <div class="field">
+    <label for="f-name">name contains</label>
+    <input type="text" id="f-name" placeholder="substring">
+  </div>
+  <div class="field">
+    <label for="f-kind">kind</label>
+    <select id="f-kind"><option value="">all</option></select>
+  </div>
+  <div class="field">
+    <label for="f-engine">engine</label>
+    <select id="f-engine"><option value="">all</option></select>
+  </div>
+  <div class="field">
+    <label for="f-refreshable">refreshable</label>
+    <select id="f-refreshable">
+      <option value="">any</option>
+      <option value="true">yes</option>
+      <option value="false">no</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>labels</label>
+    <div id="label-rows"></div>
+    <button id="label-add" type="button">+ label filter</button>
+  </div>
+</div>
+
+<main>
+  <div id="status"></div>
+  <table>
+    <thead>
+      <tr><th>name</th><th>database</th><th>kind</th><th>engine</th><th>refreshable</th><th>labels</th></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div id="detail"></div>
+</main>
+
+<script>
+  const clusterSel = document.getElementById('cluster');
+  const refreshBtn = document.getElementById('refresh');
+  const syncedAtEl = document.getElementById('synced-at');
+  const statusEl = document.getElementById('status');
+  const rowsEl = document.getElementById('rows');
+  const detailEl = document.getElementById('detail');
+
+  const fDatabase = document.getElementById('f-database');
+  const fName = document.getElementById('f-name');
+  const fKind = document.getElementById('f-kind');
+  const fEngine = document.getElementById('f-engine');
+  const fRefreshable = document.getElementById('f-refreshable');
+  const labelRowsEl = document.getElementById('label-rows');
+  const labelAddBtn = document.getElementById('label-add');
+
+  let nodes = [];
+  let labelFilters = []; // [{key: input, value: input}]
+
+  async function loadClusters() {
+    const clusters = await (await fetch('/api/clusters')).json();
+    clusterSel.innerHTML = clusters.map(c => `<option value="${c}">${c}</option>`).join('');
+    if (clusters.length) await loadGraph(clusters[0]);
+  }
+
+  async function loadGraph(cluster) {
+    statusEl.textContent = 'loading…';
+    const payload = await (await fetch(`/api/graph/${encodeURIComponent(cluster)}`)).json();
+    nodes = payload.nodes;
+    syncedAtEl.textContent = payload.synced_at ? `synced ${payload.synced_at}` : 'never synced';
+    populateDistinct(fDatabase, nodes.map(n => n.database));
+    populateDistinct(fKind, nodes.map(n => n.kind));
+    populateDistinct(fEngine, nodes.map(n => n.engine).filter(Boolean));
+    render();
+  }
+
+  function populateDistinct(select, values) {
+    const current = select.value;
+    const distinct = [...new Set(values)].sort();
+    select.innerHTML = '<option value="">all</option>' +
+      distinct.map(v => `<option value="${v}">${v}</option>`).join('');
+    if (distinct.includes(current)) select.value = current;
+  }
+
+  function addLabelRow() {
+    const row = document.createElement('div');
+    row.className = 'label-row';
+    row.innerHTML = `
+      <input type="text" placeholder="key">
+      <input type="text" placeholder="value">
+      <button type="button">×</button>`;
+    const [keyInput, valueInput] = row.querySelectorAll('input');
+    row.querySelector('button').addEventListener('click', () => {
+      row.remove();
+      labelFilters = labelFilters.filter(r => r !== entry);
+      render();
+    });
+    keyInput.addEventListener('input', render);
+    valueInput.addEventListener('input', render);
+    const entry = { key: keyInput, value: valueInput };
+    labelFilters.push(entry);
+    labelRowsEl.appendChild(row);
+  }
+
+  function matches(node) {
+    if (fDatabase.value && node.database !== fDatabase.value) return false;
+    if (fName.value && !node.name.toLowerCase().includes(fName.value.toLowerCase())) return false;
+    if (fKind.value && node.kind !== fKind.value) return false;
+    if (fEngine.value && node.engine !== fEngine.value) return false;
+    if (fRefreshable.value && String(node.refreshable) !== fRefreshable.value) return false;
+    for (const { key, value } of labelFilters) {
+      const k = key.value.trim();
+      if (!k) continue;
+      if (node.labels[k] !== value.value) return false;
+    }
+    return true;
+  }
+
+  function render() {
+    const filtered = nodes.filter(matches);
+    statusEl.textContent = `${filtered.length} / ${nodes.length} entities`;
+    rowsEl.innerHTML = filtered.map(n => `
+      <tr data-cluster="${n.cluster}" data-database="${n.database}" data-name="${n.name}">
+        <td>${n.name}</td>
+        <td>${n.database}</td>
+        <td>${n.kind}</td>
+        <td>${n.engine || ''}</td>
+        <td>${n.refreshable ? 'yes' : ''}</td>
+        <td>${Object.entries(n.labels).map(([k, v]) => `<span class="chip">${k}:${v}</span>`).join('')}</td>
+      </tr>`).join('');
+  }
+
+  rowsEl.addEventListener('click', (e) => {
+    const tr = e.target.closest('tr');
+    if (!tr) return;
+    rowsEl.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
+    tr.classList.add('selected');
+    const { cluster, database, name } = tr.dataset;
+    detailEl.className = 'open';
+    detailEl.textContent =
+      `selected ${cluster}/${database}/${name} — relations view not yet implemented (M14)`;
+  });
+
+  clusterSel.addEventListener('change', () => loadGraph(clusterSel.value));
+  refreshBtn.addEventListener('click', () => loadGraph(clusterSel.value));
+  [fDatabase, fName, fKind, fEngine, fRefreshable].forEach(el =>
+    el.addEventListener('input', render));
+  labelAddBtn.addEventListener('click', addLabelRow);
+
+  loadClusters();
+</script>
+
+</body>
+</html>

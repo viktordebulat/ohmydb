@@ -1,6 +1,10 @@
-"""FastAPI app: graph + entity detail + relations JSON, labels CRUD, sync trigger."""
+"""FastAPI app: graph + entity detail + relations JSON, labels CRUD, sync trigger,
+static frontend."""
+
+from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.config import AppConfig
@@ -14,6 +18,8 @@ from app.store.queries import (
     graph_payload,
     set_label,
 )
+
+WEB_DIR = Path(__file__).parent / "web"
 
 
 class LabelBody(BaseModel):
@@ -82,4 +88,9 @@ def create_app(cfg: AppConfig) -> FastAPI:
         return results
 
     app.include_router(api)
+
+    @app.get("/", include_in_schema=False)
+    def index() -> FileResponse:
+        return FileResponse(WEB_DIR / "index.html")
+
     return app

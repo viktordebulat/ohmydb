@@ -34,7 +34,7 @@ graph, and serves them over HTTP API and MCP for AI agents.
 | `app/migrations` | Alembic migration scripts, shipped inside the package (not repo-root `alembic/`) so they resolve from a non-editable install too | `env.py`, `versions/*.py` | `app/store` |
 | `app/config.py` | Load `config.yaml` → typed config | `load_config()`, `AppConfig` | — |
 | `app/cli.py` | `ohmydb sync\|serve\|mcp` entry point | `main()` | `app/config`, `app/core`, `app/api`, `app/mcp` |
-| `app/api.py` | FastAPI HTTP surface; mounts MCP at `/mcp` | `create_app()` | `app/config`, `app/core`, `app/store`, `app/mcp` |
+| `app/api.py` | FastAPI HTTP surface (routes under `/api`); mounts MCP at `/mcp`; serves the static frontend (`app/web/`) at `/` | `create_app()` | `app/config`, `app/core`, `app/store`, `app/mcp` |
 | `app/mcp.py` | fastmcp server (stdio or mounted over HTTP) | `create_mcp()` | `app/config`, `app/store` |
 
 ## Layering rule

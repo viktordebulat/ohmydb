@@ -124,6 +124,16 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   would break `.mcp.json.example`/deployed configs. Done ahead of the
   frontend work below so the static page can be served from `/` without
   colliding with API routes.
+- **M13 (2026-07-31)**: filter panel — `app/web/index.html`, single static
+  page (no build step), served by `app/api.py`'s new `GET /` (`FileResponse`,
+  mirrors the dropped Cytoscape page's serving pattern). Cluster selector
+  hits `GET /api/graph/{cluster}`; database/name/kind/engine/refreshable/
+  label filters run client-side over the fetched node list — no backend
+  changes (see rationale in Planned section below, still accurate for
+  M14). Row click is a stub pending M14. Verified with a real headless
+  browser against `task up`'s seeded ClickHouse: each filter dimension
+  exercised, row counts confirmed correct, no console errors, screenshots
+  checked.
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
@@ -157,21 +167,7 @@ param; database, name, kind, engine, refreshable, labels are per-node), and
 1-hop upstream/downstream set M14 renders. Filtering is client-side JS over
 an already-fetched cluster payload.
 
-- **M13 (planned): filter panel.** `app/web/`, static page at `/`.
-  - Cluster selector (`GET /api/clusters`, defaults to first) loads that
-    cluster's nodes (`GET /api/graph/{cluster}`).
-  - Client-side filters over the loaded node list: database (dropdown of
-    distinct values present), name (substring), kind (dropdown of distinct
-    values present), engine (dropdown of distinct values present),
-    refreshable (any/true/false), labels (add one or more `key:value` rows,
-    AND semantics).
-  - Filtered results render as a plain list/table: name, database, kind,
-    engine, refreshable, labels. Empty-cluster and no-match states both
-    show an explicit message, not a blank area.
-  - Selecting a row is the entry point into M14.
-  - Acceptance: manual QA against `task up`'s seeded ClickHouse — exercise
-    every filter dimension at least once, confirm the result set matches
-    what the same params would select by hand.
+M13 (filter panel) shipped — see Shipped list above. Remaining:
 
 - **M14 (planned): direct-relations view.** Selecting an entity (from M13,
   or a future search box) fetches
