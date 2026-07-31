@@ -104,6 +104,19 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   per-cluster rules both applied on `ohmydb sync`, and a manual label set via
   `set_label` survived a second sync where its rule-derived value differed.
 
+- **M11 (2026-07-31)**: optional GET filters — `get_relations` gained
+  `direct_only` (`GET /entities/{...}/relations?direct=`, MCP
+  `get_table_relations(direct=)`) restricting upstream/downstream to 1-hop
+  neighbors instead of the full transitive closure. `graph_payload` and MCP
+  `find_tables` gained a shared `q` filter (`store/queries.py: _matches`):
+  substring across name/database/label key/value, or an exact `key:value`
+  label lookup when `q` contains a colon (`find_tables`'s inline substring
+  check was lifted into this shared helper, dropping the duplicate). Convention
+  for future filters (see `ARCHITECTURE.md`'s common-changes table): optional
+  kwarg on the `store/queries.py` function, passthrough param in `api.py`/
+  `mcp.py` — filter logic stays in `store/queries.py` only, so it's
+  automatically DB-agnostic and shared between HTTP and MCP.
+
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
 `app/adapters/clickhouse.py`, all short) plus `LEARNINGS.md` for the
@@ -115,10 +128,10 @@ non-obvious parts. This doc stays forward-looking from here down.
   guarding mutating endpoints (`POST /sync`, `PUT`/`DELETE /labels`) and
   reads. Off by default — most deployments are localhost-only; a config flag
   turns it on for anything exposed past that.
-- **`find_tables` scale**: `app/mcp.py: find_tables` loads every entity
-  across all clusters into memory and substring-filters in Python, no
-  limit/pagination. Fine at current catalog size; add a result limit (and
-  maybe cluster-scoping) once it isn't.
+- **`find_tables`/`q` scale**: `app/store/queries.py: list_entities` loads
+  every entity across all clusters into memory and filters in Python (via
+  `_matches`), no limit/pagination. Fine at current catalog size; add a
+  result limit (and maybe cluster-scoping) once it isn't.
 - **`Merge` engine edges**: `Merge(db, regex)` has no statically resolvable
   target from DDL params (known gap, see LEARNINGS.md). Resolve the regex
   against catalog tables at sync time to emit best-effort `reads_from` edges.

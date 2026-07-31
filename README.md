@@ -29,8 +29,8 @@ The catalog is exposed as an MCP server at `/mcp/`:
 | `list_clusters` | — | Configured cluster names. Call first — `get_schema_graph` needs one. |
 | `get_schema_graph` | `cluster` | Catalog nodes for one cluster (tables, views, MVs, dictionaries + labels) and the cluster's last `synced_at`. No edges — see `get_table_relations`. |
 | `get_table` | `cluster`, `database`, `name` | One entity in full: columns with types/comments, raw DDL, engine, attrs, labels. |
-| `get_table_relations` | `cluster`, `database`, `name` | The entity plus its transitive upstream sources and downstream consumers (no separate edge list — membership in upstream/downstream already implies direction). |
-| `find_tables` | `query` | Brief matches (identity + kind + labels) by substring of name, database, or label. |
+| `get_table_relations` | `cluster`, `database`, `name`, `direct` (optional, default `False`) | The entity plus its upstream sources and downstream consumers — transitive by default, or just 1-hop neighbors when `direct=True` (no separate edge list — membership in upstream/downstream already implies direction). |
+| `find_tables` | `query` | Brief matches (identity + kind + labels) by substring of name, database, or label — or an exact `key:value` label lookup when `query` contains a colon. |
 
 ## HTTP API
 
@@ -39,9 +39,9 @@ Same host, no `/mcp/` suffix. Same Pomerium auth applies.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/clusters` | Configured cluster names. |
-| `GET` | `/graph/{cluster}` | Catalog nodes for one cluster + `synced_at`. Same no-edges shape as `get_schema_graph`. |
+| `GET` | `/graph/{cluster}?q=` | Catalog nodes for one cluster + `synced_at`. Same no-edges shape as `get_schema_graph`. Optional `q` filters by substring of name/database/label, or exact `key:value` label lookup. |
 | `GET` | `/entities/{cluster}/{database}/{name}` | One entity in full. |
-| `GET` | `/entities/{cluster}/{database}/{name}/relations` | Upstream/downstream relations for an entity. |
+| `GET` | `/entities/{cluster}/{database}/{name}/relations?direct=` | Upstream/downstream relations for an entity — transitive by default, 1-hop only when `direct=true`. |
 | `PUT` | `/labels/{cluster}/{database}/{table}` | Set a label. Body: `{"key": "...", "value": "..."}`. Always marks it `manual` (see below). |
 | `DELETE` | `/labels/{cluster}/{database}/{table}/{key}` | Remove a label. |
 | `POST` | `/sync` | Re-introspect clusters. Optional `?cluster=<name>`. |
