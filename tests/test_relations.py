@@ -61,6 +61,18 @@ def test_direct_flag_marks_one_hop_neighbors(tmp_path):
         assert by_name == {"view": True}
 
 
+def test_direct_only_restricts_to_one_hop(tmp_path):
+    factory = _setup(tmp_path)
+    with factory() as s:
+        rel = get_relations(s, "c1", "app", "raw", direct_only=True)
+        assert [d["name"] for d in rel["downstream"]] == ["mv"]
+        assert all(d["direct"] for d in rel["downstream"])
+
+        rel = get_relations(s, "c1", "an", "agg", direct_only=True)
+        assert {u["name"] for u in rel["upstream"]} == {"mv"}
+        assert {d["name"] for d in rel["downstream"]} == {"view"}
+
+
 def test_unrelated_and_missing(tmp_path):
     factory = _setup(tmp_path)
     with factory() as s:
