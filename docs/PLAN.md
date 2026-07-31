@@ -17,7 +17,7 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
 | Ingestion | Live DB introspection via `system.tables` etc. CI triggers re-sync after migrations. |
 | History | Latest state only; sync replaces. History lives in git dumps. |
 | Labels | Stored in separate identity-keyed table (cluster, database, table_name) — survives entity drop/recreate; orphan labels hidden from output, not deleted. |
-| Viz | **Dropped 2026-07-19**: first Cytoscape page not user-facing ready. Service is API+MCP only; FE research/implementation deferred. |
+| Viz | **Restarted 2026-07-31** (see Planned below). First Cytoscape+dagre attempt dropped 2026-07-19 (chaotic layout, unreadable). Second attempt: mind-elixir-core (vanilla JS, no build step), served as a static page from `app/web/`, FastAPI-mounted at `/`. |
 | Storage | SQLite first via SQLAlchemy; Postgres later = connection string swap (done). |
 | Sync trigger | CLI command + POST /sync endpoint (same code path). No scheduler. |
 | Scope | Multi-cluster from day one. Entities namespaced by cluster. |
@@ -117,13 +117,87 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   `mcp.py` — filter logic stays in `store/queries.py` only, so it's
   automatically DB-agnostic and shared between HTTP and MCP.
 
+- **M12 (2026-07-31)**: REST endpoints moved under `/api` (`app/api.py`:
+  `APIRouter(prefix="/api")`, `app.include_router(api)`) — `/clusters`,
+  `/graph/{cluster}`, `/entities/...`, `/labels/...`, `/sync` are now
+  `/api/...`. MCP mount (`/mcp`) untouched — separate protocol, and moving it
+  would break `.mcp.json.example`/deployed configs. Done ahead of the
+  frontend work below so the static page can be served from `/` without
+  colliding with API routes.
+
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
 `app/adapters/clickhouse.py`, all short) plus `LEARNINGS.md` for the
 non-obvious parts. This doc stays forward-looking from here down.
 
+## Planned: frontend visualization
+
+Restarting FE work dropped 2026-07-19 (see Decisions above). Library
+evaluated: **mind-elixir-core** (vanilla JS mind-map renderer, no framework/
+build dependency) over its **mindmapcn** wrapper (rejected — pulls in
+React+Tailwind+shadcn+bundler, this repo has no build tooling and stays
+"tiny and simple" per AGENTS.md). Served as a static page in `app/web/`
+(vendored JS, same pattern as the dropped Cytoscape attempt), mounted by
+`app/api.py` at `/` — safe now that all REST routes moved to `/api` (M12).
+
+mind-elixir's data model is a strict single-root tree (parent → children),
+not a DAG. Resolution for when that matters (an entity that's a shared
+upstream/downstream of several others, rendered together): render it once
+per branch (duplicated) and draw a dashed cross-link between the duplicate
+instances via mind-elixir's node-linking feature, rather than switching
+renderers. Not needed for M13/M14 below — a single entity's *direct* (1-hop)
+upstream/downstream can't contain the same entity twice, so it's a clean
+tree already. Becomes relevant once a milestone renders multiple entities'
+relations together (transitive/multi-hop graph) — deferred to backlog.
+
+No backend/API changes needed for M13 or M14: `graph_payload` node briefs
+already carry every field the filter panel needs (cluster is the endpoint
+param; database, name, kind, engine, refreshable, labels are per-node), and
+`GET /api/entities/.../relations?direct=true` already returns exactly the
+1-hop upstream/downstream set M14 renders. Filtering is client-side JS over
+an already-fetched cluster payload.
+
+- **M13 (planned): filter panel.** `app/web/`, static page at `/`.
+  - Cluster selector (`GET /api/clusters`, defaults to first) loads that
+    cluster's nodes (`GET /api/graph/{cluster}`).
+  - Client-side filters over the loaded node list: database (dropdown of
+    distinct values present), name (substring), kind (dropdown of distinct
+    values present), engine (dropdown of distinct values present),
+    refreshable (any/true/false), labels (add one or more `key:value` rows,
+    AND semantics).
+  - Filtered results render as a plain list/table: name, database, kind,
+    engine, refreshable, labels. Empty-cluster and no-match states both
+    show an explicit message, not a blank area.
+  - Selecting a row is the entry point into M14.
+  - Acceptance: manual QA against `task up`'s seeded ClickHouse — exercise
+    every filter dimension at least once, confirm the result set matches
+    what the same params would select by hand.
+
+- **M14 (planned): direct-relations view.** Selecting an entity (from M13,
+  or a future search box) fetches
+  `GET /api/entities/{cluster}/{database}/{name}/relations?direct=true` and
+  renders a mind-elixir tree: root = the selected entity (name/kind/engine
+  in the label); two child branches "Upstream" and "Downstream" (grouping
+  nodes, not clickable entities themselves), each populated from the
+  matching list in the response. Empty branch is either omitted or shown
+  empty — no error state, 0 upstream/downstream is a normal case (source
+  tables, terminal consumers).
+  - Clicking a rendered entity node re-centers: fetch its own direct
+    relations and re-render the tree around it — cheap graph walking
+    without full multi-hop/DAG rendering.
+  - Acceptance: manual QA against the seeded ClickHouse — pick an MV with
+    known upstream sources and downstream consumers, confirm the rendered
+    tree matches `GET .../relations?direct=true`'s JSON exactly (same
+    entities, no extras, no drops).
+
 ## Backlog
 
+- **Frontend: transitive/multi-entity graph view**: expand M14 beyond one
+  entity's direct relations — full filtered graph rendering, multi-hop
+  walks, or overlaying several entities at once. This is where the
+  mind-elixir tree-vs-DAG mismatch (see Planned section above) actually
+  bites; needs the cross-link-overlay approach (or a different renderer)
+  implemented, not just decided.
 - **Auth for API/MCP (optional)**: opt-in auth (e.g. bearer token via config)
   guarding mutating endpoints (`POST /sync`, `PUT`/`DELETE /labels`) and
   reads. Off by default — most deployments are localhost-only; a config flag

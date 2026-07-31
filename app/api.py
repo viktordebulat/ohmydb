@@ -1,6 +1,6 @@
 """FastAPI app: graph + entity detail + relations JSON, labels CRUD, sync trigger."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from app.config import AppConfig
@@ -29,16 +29,18 @@ def create_app(cfg: AppConfig) -> FastAPI:
     app = FastAPI(title="ohmydb", lifespan=mcp_app.lifespan)
     app.mount("/mcp", mcp_app)
 
-    @app.get("/clusters")
+    api = APIRouter(prefix="/api")
+
+    @api.get("/clusters")
     def clusters() -> list[str]:
         return [c.name for c in cfg.clusters]
 
-    @app.get("/graph/{cluster}")
+    @api.get("/graph/{cluster}")
     def graph(cluster: str, q: str | None = None) -> dict:
         with factory() as s:
             return graph_payload(s, cluster, q)
 
-    @app.get("/entities/{cluster}/{database}/{name}")
+    @api.get("/entities/{cluster}/{database}/{name}")
     def entity(cluster: str, database: str, name: str) -> dict:
         with factory() as s:
             payload = get_entity(s, cluster, database, name)
@@ -46,7 +48,7 @@ def create_app(cfg: AppConfig) -> FastAPI:
             raise HTTPException(status_code=404, detail="entity not found")
         return payload
 
-    @app.get("/entities/{cluster}/{database}/{name}/relations")
+    @api.get("/entities/{cluster}/{database}/{name}/relations")
     def relations(cluster: str, database: str, name: str, direct: bool = False) -> dict:
         with factory() as s:
             payload = get_relations(s, cluster, database, name, direct_only=direct)
@@ -54,20 +56,20 @@ def create_app(cfg: AppConfig) -> FastAPI:
             raise HTTPException(status_code=404, detail="entity not found")
         return payload
 
-    @app.put("/labels/{cluster}/{database}/{table}")
+    @api.put("/labels/{cluster}/{database}/{table}")
     def put_label(cluster: str, database: str, table: str, body: LabelBody) -> dict:
         with factory() as s:
             set_label(s, cluster, database, table, body.key, body.value)
         return {"ok": True}
 
-    @app.delete("/labels/{cluster}/{database}/{table}/{key}")
+    @api.delete("/labels/{cluster}/{database}/{table}/{key}")
     def remove_label(cluster: str, database: str, table: str, key: str) -> dict:
         with factory() as s:
             if not delete_label(s, cluster, database, table, key):
                 raise HTTPException(status_code=404, detail="label not found")
         return {"ok": True}
 
-    @app.post("/sync")
+    @api.post("/sync")
     def sync(cluster: str | None = None) -> dict:
         try:
             results = run_sync(cfg, only_cluster=cluster)
@@ -79,4 +81,5 @@ def create_app(cfg: AppConfig) -> FastAPI:
             )
         return results
 
+    app.include_router(api)
     return app

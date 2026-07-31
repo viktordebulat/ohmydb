@@ -36,15 +36,17 @@ The catalog is exposed as an MCP server at `/mcp/`:
 
 Same host, no `/mcp/` suffix. Same Pomerium auth applies.
 
+All paths below are under `/api`.
+
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/clusters` | Configured cluster names. |
-| `GET` | `/graph/{cluster}?q=` | Catalog nodes for one cluster + `synced_at`. Same no-edges shape as `get_schema_graph`. Optional `q` filters by substring of name/database/label, or exact `key:value` label lookup. |
-| `GET` | `/entities/{cluster}/{database}/{name}` | One entity in full. |
-| `GET` | `/entities/{cluster}/{database}/{name}/relations?direct=` | Upstream/downstream relations for an entity — transitive by default, 1-hop only when `direct=true`. |
-| `PUT` | `/labels/{cluster}/{database}/{table}` | Set a label. Body: `{"key": "...", "value": "..."}`. Always marks it `manual` (see below). |
-| `DELETE` | `/labels/{cluster}/{database}/{table}/{key}` | Remove a label. |
-| `POST` | `/sync` | Re-introspect clusters. Optional `?cluster=<name>`. |
+| `GET` | `/api/clusters` | Configured cluster names. |
+| `GET` | `/api/graph/{cluster}?q=` | Catalog nodes for one cluster + `synced_at`. Same no-edges shape as `get_schema_graph`. Optional `q` filters by substring of name/database/label, or exact `key:value` label lookup. |
+| `GET` | `/api/entities/{cluster}/{database}/{name}` | One entity in full. |
+| `GET` | `/api/entities/{cluster}/{database}/{name}/relations?direct=` | Upstream/downstream relations for an entity — transitive by default, 1-hop only when `direct=true`. |
+| `PUT` | `/api/labels/{cluster}/{database}/{table}` | Set a label. Body: `{"key": "...", "value": "..."}`. Always marks it `manual` (see below). |
+| `DELETE` | `/api/labels/{cluster}/{database}/{table}/{key}` | Remove a label. |
+| `POST` | `/api/sync` | Re-introspect clusters. Optional `?cluster=<name>`. |
 
 ## Labels: manual vs. auto
 
