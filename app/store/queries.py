@@ -35,17 +35,37 @@ def _node_briefs(session: Session, entities: list[EntityRow]) -> list[dict]:
     ]
 
 
-def list_entities(session: Session, cluster: str | None = None) -> list[dict]:
+def _matches(node: dict, q: str) -> bool:
+    """Match rule shared by any endpoint/tool searching entities. `key:value`
+    (colon present) does an exact label lookup — key and value must both
+    match exactly. Otherwise: substring match against name, database, or any
+    label key/value."""
+    if ":" in q:
+        key, _, value = q.partition(":")
+        return node["labels"].get(key) == value
+    q = q.lower()
+    return (
+        q in node["name"].lower()
+        or q in node["database"].lower()
+        or any(q in k.lower() or q in v.lower() for k, v in node["labels"].items())
+    )
+
+
+def list_entities(session: Session, cluster: str | None = None, q: str | None = None) -> list[dict]:
     """Node listing, no edges — used by search (find_tables) which scans
-    across all clusters and doesn't need the full graph."""
+    across all clusters and doesn't need the full graph. `q` filters via
+    _matches (see there for substring vs key:value semantics)."""
     stmt = select(EntityRow)
     if cluster is not None:
         stmt = stmt.where(EntityRow.cluster == cluster)
     entities = session.scalars(stmt).all()
-    return _node_briefs(session, entities)
+    briefs = _node_briefs(session, entities)
+    if q is not None:
+        briefs = [n for n in briefs if _matches(n, q)]
+    return briefs
 
 
-def graph_payload(session: Session, cluster: str) -> dict:
+def graph_payload(session: Session, cluster: str, q: str | None = None) -> dict:
     # No edges list — redundant with per-entity upstream/downstream
     # (see get_relations); a caller wanting dependency direction for one
     # entity should call that instead of walking edges here.
@@ -53,9 +73,12 @@ def graph_payload(session: Session, cluster: str) -> dict:
     # One value for the whole graph, not per node — a sync writes the same
     # timestamp to every entity of a cluster in one transaction.
     synced_at = max((e.synced_at for e in entities if e.synced_at), default=None)
+    nodes = _node_briefs(session, entities)
+    if q is not None:
+        nodes = [n for n in nodes if _matches(n, q)]
     return {
         "synced_at": synced_at.isoformat() if synced_at else None,
-        "nodes": _node_briefs(session, entities),
+        "nodes": nodes,
     }
 
 
@@ -87,9 +110,12 @@ def get_entity(session: Session, cluster: str, database: str, name: str) -> dict
     }
 
 
-def get_relations(session: Session, cluster: str, database: str, name: str) -> dict | None:
+def get_relations(
+    session: Session, cluster: str, database: str, name: str, direct_only: bool = False
+) -> dict | None:
     """All entities related to one entity: transitive upstream (data sources)
-    and downstream (consumers). No separate edges list — membership in
+    and downstream (consumers), or just the 1-hop neighbors when
+    `direct_only` is set. No separate edges list — membership in
     upstream/downstream already implies the dependency direction (writes_to
     and reads_from/dict_source both fold into these two sets at sync time).
     Each entry is also flagged `direct` (immediate 1-hop neighbor vs reached
@@ -108,11 +134,6 @@ def get_relations(session: Session, cluster: str, database: str, name: str) -> d
     if target is None:
         return None
 
-    keep = set(target.upstream) | set(target.downstream) | {target.id}
-    rows = session.scalars(select(EntityRow).where(EntityRow.id.in_(keep))).all()
-    by_id = {r.id: r for r in rows}
-    labels = _labels_for(session, rows)
-
     # Direct (1-hop) neighbors: this entity's own edges, same direction
     # convention as repo.py's flow_out/flow_in (writes_to flows src->dst,
     # reads_from/dict_source flow dst->src).
@@ -128,6 +149,16 @@ def get_relations(session: Session, cluster: str, database: str, name: str) -> d
         if to == target.id:
             direct_upstream.add(frm)
 
+    if direct_only:
+        upstream_ids, downstream_ids = direct_upstream, direct_downstream
+    else:
+        upstream_ids, downstream_ids = set(target.upstream), set(target.downstream)
+
+    keep = upstream_ids | downstream_ids | {target.id}
+    rows = session.scalars(select(EntityRow).where(EntityRow.id.in_(keep))).all()
+    by_id = {r.id: r for r in rows}
+    labels = _labels_for(session, rows)
+
     def brief(r: EntityRow, direct_ids: set[int]) -> dict:
         return {
             "cluster": r.cluster,
@@ -142,8 +173,8 @@ def get_relations(session: Session, cluster: str, database: str, name: str) -> d
     order = lambda i: (by_id[i].cluster, by_id[i].database, by_id[i].name)  # noqa: E731
     return {
         "entity": brief(target, set()),
-        "upstream": [brief(by_id[i], direct_upstream) for i in sorted(target.upstream, key=order)],
-        "downstream": [brief(by_id[i], direct_downstream) for i in sorted(target.downstream, key=order)],
+        "upstream": [brief(by_id[i], direct_upstream) for i in sorted(upstream_ids, key=order)],
+        "downstream": [brief(by_id[i], direct_downstream) for i in sorted(downstream_ids, key=order)],
     }
 
 

@@ -34,9 +34,9 @@ def create_app(cfg: AppConfig) -> FastAPI:
         return [c.name for c in cfg.clusters]
 
     @app.get("/graph/{cluster}")
-    def graph(cluster: str) -> dict:
+    def graph(cluster: str, q: str | None = None) -> dict:
         with factory() as s:
-            return graph_payload(s, cluster)
+            return graph_payload(s, cluster, q)
 
     @app.get("/entities/{cluster}/{database}/{name}")
     def entity(cluster: str, database: str, name: str) -> dict:
@@ -47,9 +47,9 @@ def create_app(cfg: AppConfig) -> FastAPI:
         return payload
 
     @app.get("/entities/{cluster}/{database}/{name}/relations")
-    def relations(cluster: str, database: str, name: str) -> dict:
+    def relations(cluster: str, database: str, name: str, direct: bool = False) -> dict:
         with factory() as s:
-            payload = get_relations(s, cluster, database, name)
+            payload = get_relations(s, cluster, database, name, direct_only=direct)
         if payload is None:
             raise HTTPException(status_code=404, detail="entity not found")
         return payload

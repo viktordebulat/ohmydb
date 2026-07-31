@@ -49,32 +49,26 @@ def create_mcp(cfg: AppConfig) -> FastMCP:
         return payload
 
     @mcp.tool
-    def get_table_relations(cluster: str, database: str, name: str) -> dict:
+    def get_table_relations(cluster: str, database: str, name: str, direct: bool = False) -> dict:
         """All entities related to one table: transitive upstream data sources
         and transitive downstream consumers (MVs, views, aggregates,
-        dictionaries)."""
+        dictionaries). Set direct=True for only the immediate 1-hop
+        neighbors."""
         with factory() as s:
-            payload = get_relations(s, cluster, database, name)
+            payload = get_relations(s, cluster, database, name, direct_only=direct)
         if payload is None:
             raise ValueError(f"entity not found: {cluster}/{database}/{name}")
         return payload
 
     @mcp.tool
     def find_tables(query: str) -> dict:
-        """Search entities by substring of name, database, or label value,
-        across all clusters. Rows encoded as `columns` + `rows`
+        """Search entities across all clusters. `key:value` (colon present)
+        does an exact label lookup; otherwise substring match against name,
+        database, or any label key/value. Rows encoded as `columns` + `rows`
         (array-of-arrays) instead of one dict per match, to cut repeated key
         names at scale — zip(columns, row) to get a match dict back."""
-        q = query.lower()
         with factory() as s:
-            nodes = list_entities(s)
-        matches = [
-            n
-            for n in nodes
-            if q in n["name"].lower()
-            or q in n["database"].lower()
-            or any(q in v.lower() or q in k.lower() for k, v in n["labels"].items())
-        ]
+            matches = list_entities(s, q=query)
         columns = ["cluster", "database", "name", "kind", "labels"]
         return {
             "columns": columns,

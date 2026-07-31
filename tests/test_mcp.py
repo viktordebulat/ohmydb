@@ -50,6 +50,11 @@ def test_mcp_tools(tmp_path):
             name_idx = found["columns"].index("name")
             assert [row[name_idx] for row in found["rows"]] == ["events"]
 
+            found = _payload(await c.call_tool("find_tables", {"query": "source:vector"}))
+            assert [row[name_idx] for row in found["rows"]] == ["events"]
+            found = _payload(await c.call_tool("find_tables", {"query": "source:vec"}))
+            assert found["rows"] == []
+
             rel = _payload(await c.call_tool(
                 "get_table_relations", {"cluster": "c1", "database": "app", "name": "events"}))
             assert rel["entity"]["name"] == "events"

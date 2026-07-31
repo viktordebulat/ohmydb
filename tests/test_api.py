@@ -69,6 +69,27 @@ def test_relations(tmp_path):
     assert client.get("/entities/c1/app/nope/relations").status_code == 404
 
 
+def test_relations_direct_only(tmp_path):
+    client = _client(tmp_path)
+    body = client.get("/entities/c1/app/events/relations?direct=true").json()
+    assert [d["name"] for d in body["downstream"]] == ["mv"]
+
+
+def test_graph_search_by_label(tmp_path):
+    client = _client(tmp_path)
+    client.put("/labels/c1/app/events", json={"key": "source", "value": "vector"})
+    g = client.get("/graph/c1?q=vector").json()
+    assert {n["name"] for n in g["nodes"]} == {"events"}
+
+
+def test_graph_search_by_label_key_value(tmp_path):
+    client = _client(tmp_path)
+    client.put("/labels/c1/app/events", json={"key": "source", "value": "vector"})
+    assert {n["name"] for n in client.get("/graph/c1?q=source:vector").json()["nodes"]} == {"events"}
+    assert client.get("/graph/c1?q=source:vec").json()["nodes"] == []
+    assert client.get("/graph/c1?q=other:vector").json()["nodes"] == []
+
+
 def test_labels_crud(tmp_path):
     client = _client(tmp_path)
     assert client.put("/labels/c1/app/events", json={"key": "source", "value": "vector"}).status_code == 200
