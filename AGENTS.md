@@ -56,6 +56,7 @@ Config/deploy notes not covered there:
 task up      # full local stack: seeded ClickHouse + sync + API on :8080 (MCP at /mcp)
 task serve   # service only, no ClickHouse (API + MCP at /mcp, existing catalog sqlite)
 task sync    # re-introspect clusters
+task demo:build # build docs/demo/, the static GitHub Pages snapshot of the frontend
 task mcp     # MCP server over stdio (alternative to the HTTP /mcp mount)
 task test    # tests; integration auto-skips without ClickHouse
 task check   # tests + docs:verify (ARCHITECTURE.md drift check) — source of truth for "is it green"
