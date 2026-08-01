@@ -1,7 +1,7 @@
 import MindElixir from '/vendor/mind-elixir.js';
 
 const clusterSel = document.getElementById('cluster');
-const refreshBtn = document.getElementById('refresh');
+const reloadBtn = document.getElementById('reload');
 const syncedAtEl = document.getElementById('synced-at');
 const statusEl = document.getElementById('status');
 const rowsEl = document.getElementById('rows');
@@ -218,7 +218,7 @@ rowsEl.addEventListener('click', (e) => {
 
 relationsCloseBtn.addEventListener('click', closeRelations);
 clusterSel.addEventListener('change', () => loadGraph(clusterSel.value));
-refreshBtn.addEventListener('click', () => loadGraph(clusterSel.value));
+reloadBtn.addEventListener('click', () => loadGraph(clusterSel.value));
 [fDatabase, fName, fKind, fEngine, fRefreshable].forEach(el =>
   el.addEventListener('input', render));
 labelAddBtn.addEventListener('click', addLabelRow);
