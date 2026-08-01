@@ -1,0 +1,1 @@
+{"entity":{"cluster":"local","database":"app","name":"recent_events","kind":"view","engine":"View","labels":{},"direct":false},"upstream":[{"cluster":"local","database":"app","name":"events","kind":"table","engine":"MergeTree","labels":{"service":"data-pipelines"},"direct":true}],"downstream":[]}

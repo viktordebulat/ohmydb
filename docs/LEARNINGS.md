@@ -191,6 +191,20 @@ Gotchas discovered during implementation. Append after each task, then compact
   background was already correct, which made the first fix attempt look
   right when it wasn't — the *inner* canvas was the thing not resizing).
 
+## CI/Pages
+
+- Static-hosting a `fetch()`-driven SPA (GitHub Pages) needs zero frontend
+  changes: pre-render each GET endpoint's JSON to a plain file at the same
+  path the page already requests — static hosts ignore query strings, so
+  `?direct=true` etc. need no special-casing. `TestClient(create_app(cfg))`
+  in-process against an already-synced catalog is enough to walk every route;
+  no need to actually bind a port via `ohmydb serve`.
+- `pre-commit run --all-files` (what `pre-commit/action` runs in CI) checks
+  every tracked file, not just ones touched by the current change — adding
+  the hook repo-wide surfaced pre-existing whitespace violations in vendored
+  JS and a generated Alembic migration. One-time cleanup commit first,
+  verified whitespace-only via `git diff -w`, before CI could go green.
+
 ## Environment
 
 - colima VM can leave stale disk lock after crash ("in use by instance");

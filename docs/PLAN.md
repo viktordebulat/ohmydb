@@ -333,4 +333,3 @@ this section flagged is tracked in Backlog below.
 Touches for the last resolved item (M10, array/CSV encoding for
 `get_schema_graph`/`find_tables`): `app/mcp.py` only (see above — not
 `graph_payload`).
-
