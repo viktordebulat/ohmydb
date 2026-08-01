@@ -1,4 +1,4 @@
-import MindElixir from '/vendor/mind-elixir.js';
+import MindElixir from './vendor/mind-elixir.js';
 
 const clusterSel = document.getElementById('cluster');
 const reloadBtn = document.getElementById('reload');
@@ -26,14 +26,14 @@ let nodes = [];
 let labelFilters = []; // [{key: input, value: input}]
 
 async function loadClusters() {
-  const clusters = await (await fetch('/api/clusters')).json();
+  const clusters = await (await fetch('api/clusters')).json();
   clusterSel.innerHTML = clusters.map(c => `<option value="${c}">${c}</option>`).join('');
   if (clusters.length) await loadGraph(clusters[0]);
 }
 
 async function loadGraph(cluster) {
   statusEl.textContent = 'loading…';
-  const payload = await (await fetch(`/api/graph/${encodeURIComponent(cluster)}`)).json();
+  const payload = await (await fetch(`api/graph/${encodeURIComponent(cluster)}`)).json();
   nodes = payload.nodes;
   syncedAtEl.textContent = payload.synced_at ? `synced ${payload.synced_at}` : 'never synced';
   populateDistinct(fDatabase, nodes.map(n => n.database));
@@ -243,7 +243,7 @@ async function showRelations(cluster, database, name) {
   splitEl.classList.add('relations-open');
   relationsTitleEl.textContent = `loading relations for ${cluster}/${database}/${name}…`;
   const res = await fetch(
-    `/api/entities/${encodeURIComponent(cluster)}/${encodeURIComponent(database)}/${encodeURIComponent(name)}/relations?direct=true`
+    `api/entities/${encodeURIComponent(cluster)}/${encodeURIComponent(database)}/${encodeURIComponent(name)}/relations?direct=true`
   );
   if (!res.ok) {
     relationsTitleEl.textContent = `no relations found for ${cluster}/${database}/${name}`;
