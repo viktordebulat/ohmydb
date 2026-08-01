@@ -43,6 +43,11 @@ tasks:
       - uv run python scripts/build_demo.py
       - docker compose --profile postgres down
 
+  demo:check:
+    desc: "Fail if app/web/ changed more recently than its docs/demo/ snapshot"
+    cmds:
+      - ./scripts/check-demo.sh
+
   mcp:
     desc: "MCP server over stdio (for AI agents that spawn a local process)"
     cmds:
@@ -64,10 +69,11 @@ tasks:
       - uv run alembic revision --autogenerate -m "{{.CLI_ARGS}}"
 
   check:
-    desc: "Full check: tests + architecture docs drift"
+    desc: "Full check: tests + architecture docs drift + demo freshness"
     cmds:
       - task: test
       - task: docs:verify
+      - task: demo:check
 
   down:
     desc: "Stop containers"
