@@ -177,6 +177,19 @@ Gotchas discovered during implementation. Append after each task, then compact
   then read the actual bound port from
   `server.servers[0].sockets[0].getsockname()`. Teardown is
   `server.should_exit = True` + `thread.join()`.
+- mind-elixir's constructor sets `style.position = "relative"` inline on
+  whatever element you pass as `el`, unconditionally. An inline style beats
+  any stylesheet rule regardless of specificity, so `#mindmap { position:
+  absolute; inset: 0; }` in a CSS file silently does nothing — the element
+  never tracks a resizing parent (e.g. a live drag-resize handle), even
+  though nothing errors and a static screenshot at rest looks fine. Give it
+  `flex: 1` inside a `display: flex` parent instead — flex sizing doesn't
+  read the `position` property, so it fills correctly regardless of what
+  mind-elixir sets. Caught by measuring `getBoundingClientRect()` on the
+  wrapper vs. `#mindmap` vs. mind-elixir's own `.map-container` during a
+  scripted drag, not by checking background-color alone (the wrapper's own
+  background was already correct, which made the first fix attempt look
+  right when it wasn't — the *inner* canvas was the thing not resizing).
 
 ## Environment
 

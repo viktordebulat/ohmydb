@@ -15,6 +15,7 @@ from app.api import create_app
 from app.config import AppConfig, ClusterConfig
 from app.core.models import Edge, EdgeKind, Entity, EntityKind
 from app.store.db import make_session_factory
+from app.store.queries import set_label
 from app.store.repo import sync_cluster
 
 
@@ -34,6 +35,11 @@ pytestmark = pytest.mark.skipif(
     reason="playwright chromium not installed (uv run playwright install chromium)",
 )
 
+# Deliberately arbitrary — the frontend doesn't special-case any label key,
+# so the fixture shouldn't look tied to one either.
+LABEL_KEY = "zzz-test-key"
+LABEL_VALUE = "zzz-test-value"
+
 
 @pytest.fixture
 def live_server(tmp_path):
@@ -51,6 +57,7 @@ def live_server(tmp_path):
             ],
             [Edge(("c1", "analytics", "mv"), ("c1", "app", "events"), EdgeKind.READS_FROM)],
         )
+        set_label(s, "c1", "app", "events", LABEL_KEY, LABEL_VALUE)
     cfg = AppConfig(storage_url=url, clusters=[ClusterConfig(name="c1", host="localhost")])
 
     config = uvicorn.Config(create_app(cfg), host="127.0.0.1", port=0, log_level="warning")
@@ -91,11 +98,25 @@ def test_row_click_renders_relations_tree(live_server):
         page.click('#rows tr:has(td:text-is("mv"))')
         page.wait_for_selector("#mindmap me-root")
 
-        root_topic = page.text_content("#mindmap me-root me-tpc .text")
-        assert root_topic == "mv\nanalytics"  # database, not kind (M15)
+        # topic is HTML now (name / database·engine / one line per label,
+        # see nodeTopicHtml in app.js) — check the structured divs, not a
+        # flattened text_content() (M18: labels on the graph)
+        root_name = page.text_content("#mindmap me-root me-tpc .text > div:nth-child(1)")
+        root_sub = page.text_content("#mindmap me-root me-tpc .text > div:nth-child(2)")
+        assert (root_name, root_sub) == ("mv", "analytics")  # database, not kind (M15)
+        assert page.locator("#mindmap me-root .tpc-label").count() == 0  # mv has no labels
 
         branch_topics = page.locator(
             "#mindmap me-main > me-wrapper > me-parent > me-tpc .text"
         ).all_text_contents()
         assert branch_topics == ["Upstream (1)", "Downstream (0)"]
+
+        # "events" (the upstream leaf) shows the label's value only (key is
+        # conveyed by the swatch color / legend, not repeated on the node)
+        events_label = page.locator("#mindmap me-children .tpc-label")
+        assert events_label.text_content().strip() == LABEL_VALUE
+        assert events_label.get_attribute("title") == LABEL_KEY
+
+        # legend lists every label key present in the rendered tree
+        assert page.text_content("#legend").strip() == LABEL_KEY
         browser.close()
