@@ -1,0 +1,1 @@
+{"entity":{"cluster":"local","database":"analytics","name":"daily_counts","kind":"mat_view","engine":"MaterializedView","labels":{},"direct":false},"upstream":[{"cluster":"local","database":"app","name":"events","kind":"table","engine":"MergeTree","labels":{"service":"data-pipelines"},"direct":true}],"downstream":[]}

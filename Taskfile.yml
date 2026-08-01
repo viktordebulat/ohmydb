@@ -33,6 +33,16 @@ tasks:
     cmds:
       - uv run ohmydb sync
 
+  demo:build:
+    desc: "Build the static GitHub Pages demo snapshot (docs/demo/) from a seeded local ClickHouse"
+    cmds:
+      - uv sync
+      - docker compose up -d --wait clickhouse
+      - docker compose run --rm clickhouse-init
+      - uv run ohmydb sync
+      - uv run python scripts/build_demo.py
+      - docker compose --profile postgres down
+
   mcp:
     desc: "MCP server over stdio (for AI agents that spawn a local process)"
     cmds:

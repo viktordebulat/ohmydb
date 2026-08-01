@@ -1,0 +1,1 @@
+{"entity":{"cluster":"local","database":"app","name":"users","kind":"table","engine":"MergeTree","labels":{"service":"vector"},"direct":false},"upstream":[],"downstream":[{"cluster":"local","database":"app","name":"users_dict","kind":"dictionary","engine":"Dictionary","labels":{},"direct":true}]}
