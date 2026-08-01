@@ -17,7 +17,7 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
 | Ingestion | Live DB introspection via `system.tables` etc. CI triggers re-sync after migrations. |
 | History | Latest state only; sync replaces. History lives in git dumps. |
 | Labels | Stored in separate identity-keyed table (cluster, database, table_name) — survives entity drop/recreate; orphan labels hidden from output, not deleted. |
-| Viz | **Dropped 2026-07-19**: first Cytoscape page not user-facing ready. Service is API+MCP only; FE research/implementation deferred. |
+| Viz | **Restarted 2026-07-31** (see Planned below). First Cytoscape+dagre attempt dropped 2026-07-19 (chaotic layout, unreadable). Second attempt: mind-elixir-core (vanilla JS, no build step), served as a static page from `app/web/`, FastAPI-mounted at `/`. |
 | Storage | SQLite first via SQLAlchemy; Postgres later = connection string swap (done). |
 | Sync trigger | CLI command + POST /sync endpoint (same code path). No scheduler. |
 | Scope | Multi-cluster from day one. Entities namespaced by cluster. |
@@ -117,13 +117,152 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   `mcp.py` — filter logic stays in `store/queries.py` only, so it's
   automatically DB-agnostic and shared between HTTP and MCP.
 
+- **M12 (2026-07-31)**: REST endpoints moved under `/api` (`app/api.py`:
+  `APIRouter(prefix="/api")`, `app.include_router(api)`) — `/clusters`,
+  `/graph/{cluster}`, `/entities/...`, `/labels/...`, `/sync` are now
+  `/api/...`. MCP mount (`/mcp`) untouched — separate protocol, and moving it
+  would break `.mcp.json.example`/deployed configs. Done ahead of the
+  frontend work below so the static page can be served from `/` without
+  colliding with API routes.
+- **M13 (2026-07-31)**: filter panel — `app/web/index.html`, single static
+  page (no build step), served by `app/api.py`'s new `GET /` (`FileResponse`,
+  mirrors the dropped Cytoscape page's serving pattern). Cluster selector
+  hits `GET /api/graph/{cluster}`; database/name/kind/engine/refreshable/
+  label filters run client-side over the fetched node list — no backend
+  changes (see rationale in Planned section below, still accurate for
+  M14). Row click is a stub pending M14. Verified with a real headless
+  browser against `task up`'s seeded ClickHouse: each filter dimension
+  exercised, row counts confirmed correct, no console errors, screenshots
+  checked.
+- **M14 (2026-08-01)**: direct-relations view. Row click fetches
+  `GET /api/entities/{cluster}/{database}/{name}/relations?direct=true` and
+  renders a mind-elixir tree via the vendored `app/web/vendor/mind-elixir.js`/
+  `.css` (MIT, from `mind-elixir` npm's ESM `dist/MindElixir.js` build —
+  self-contained, no bare imports); `app/api.py` gained
+  `app.mount("/vendor", StaticFiles(...))` to serve it. Root = the selected
+  entity (`name`/`kind`/`engine` in the label), two child branches
+  "Upstream (n)"/"Downstream (n)" populated from the response. Clicking a
+  rendered entity node re-centers (refetches that node's own direct
+  relations, `mind.refresh()`s the tree) via mind-elixir's `selectNodes` bus
+  event, filtered to ids prefixed `e:` (group nodes "Upstream"/"Downstream"
+  use a `g:` prefix and are inert, so clicking them is a no-op). Verified
+  with a headless browser against `task up`'s seeded ClickHouse: rendered
+  root/branch/leaf text cross-checked against the same entity's raw
+  `relations?direct=true` JSON, re-centering confirmed by clicking a leaf
+  node, zero console errors.
+- **M15 (2026-08-01)**: frontend UI pass. `app/web/index.html` split into
+  `app.css`/`app.js` (thin HTML shell); `app/api.py`'s serving simplified to
+  one `app.mount("/", StaticFiles(directory=WEB_DIR, html=True))` —
+  supersedes M13/M14's custom index route + separate `/vendor` mount
+  (`StaticFiles` serves nested dirs and `html=True` covers `/` → `index.html`
+  on its own). Header reordered: refresh button is now the rightmost
+  element, synced-at immediately left of it. Relations panel gained a close
+  button (`×`, hides the panel; the `mind` instance stays alive for cheap
+  reopening). Graph node labels show `database` instead of `kind` (kind was
+  redundant with the branch grouping; database wasn't shown anywhere in the
+  tree before). Layout rebuilt as a fixed-height app shell (`body{overflow:
+  hidden}`, `#split` flex column) so the browse pane (filters+table) and the
+  relations pane can be resized against each other via a `row-resize` drag
+  handle (`#split-handle`, plain pointer events, no library — the handle
+  only appears once relations is open, and dragging just sets an explicit
+  px `flex-basis` on the browse pane while the relations pane keeps
+  `flex:1` to fill the remainder). `#filters` capped at `max-height:200px`
+  with its own scroll so a long label-filter list can't push the rest of
+  the page around. `render()` still has no pagination/limit — the browse
+  pane scrolls independently so the full filtered result set is always in
+  the DOM. Verified with a headless browser against `task up`: asset
+  content-types confirmed, header order, database-in-label, drag-resize
+  (measured browse-pane height change), close-then-reopen, zero console
+  errors.
+- **M16 (2026-08-01)**: light/dark/auto theme switch, top-right corner of
+  the header (rightmost — after the M15 refresh button). Page CSS vars
+  restructured to a 3-way selector split: base `:root` = light, `@media
+  (prefers-color-scheme: dark) { :root:not([data-theme]) {...} }` = auto
+  following the OS, `:root[data-theme="dark"] {...}` = explicit override
+  independent of OS (explicit "light" needs no separate block — it's just
+  the base `:root` values with `:not([data-theme])` no longer matching, so
+  the media-query override is skipped). Choice persisted to
+  `localStorage["oh-my-db-theme"]`; a small inline script in `index.html`'s
+  `<head>` applies a saved non-auto choice before first paint (avoids a
+  flash of the wrong theme) — its hardcoded key literal has to match
+  `THEME_KEY` in `app.js` (documented in both places, no clean way to share
+  a constant between an inline `<head>` script and an ES module without
+  more machinery than this is worth).
+  - Gotcha caught after first pass: mind-elixir renders into its own
+    `.map-container` with its own theme object (bgcolor/text color per
+    node) — it does not inherit the page's CSS custom properties, so the
+    graph stayed light while the rest of the page went dark. Fixed by
+    passing `theme: MindElixir.THEME`/`DARK_THEME` at construction and
+    calling `mind.changeTheme(...)` from `applyTheme()` on every switch
+    click, plus a `prefers-color-scheme` `MediaQueryList` change listener
+    so "auto" also reacts to a live OS theme flip (mind-elixir only
+    auto-detects the OS preference once, at construction).
+  - Verified with a headless browser against `task up`: OS=dark defaults
+    to dark with no saved choice; explicit "light" click overrides OS=dark;
+    choice survives reload; explicit "dark" click confirmed via the mind
+    map's own computed `background-color` (not just the page chrome) to
+    catch exactly the gotcha above; back to "auto" clears the `data-theme`
+    attribute; fresh OS=light context defaults to light.
+- **M17 (2026-08-01)**: UI smoke tests, `tests/test_web_ui.py`. `playwright`
+  added as a dev dependency (`uv add --group dev playwright`, one-time
+  `uv run playwright install chromium`) — auto-skips like
+  `test_clickhouse_integration.py` when Chromium isn't installed (checked by
+  actually launching+closing it once), so `Dockerfile.example`'s test stage
+  (no browser, no network) still passes. A `live_server` fixture runs
+  `uvicorn.Server` in a background thread on a random port — `TestClient`
+  can't be pointed to by a real browser, it's in-process HTTP only — seeded
+  with the same events→mv fixture shape as `test_api.py`. Two tests: table
+  renders both seeded entities; clicking a row renders the mind-elixir tree
+  with the right root topic (`mv\nanalytics`, confirming M15's
+  database-over-kind label) and branch counts (`Upstream (1)`,
+  `Downstream (0)`). Deliberately just a smoke pass, not full UI coverage —
+  matches AGENTS.md's "minimal test coverage" rule; the manual
+  headless-browser pass per milestone still exists for anything deeper.
+
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
 `app/adapters/clickhouse.py`, all short) plus `LEARNINGS.md` for the
 non-obvious parts. This doc stays forward-looking from here down.
 
+## Planned: frontend visualization
+
+Restarting FE work dropped 2026-07-19 (see Decisions above). Library
+evaluated: **mind-elixir-core** (vanilla JS mind-map renderer, no framework/
+build dependency) over its **mindmapcn** wrapper (rejected — pulls in
+React+Tailwind+shadcn+bundler, this repo has no build tooling and stays
+"tiny and simple" per AGENTS.md). Served as a static page in `app/web/`
+(vendored JS, same pattern as the dropped Cytoscape attempt), mounted by
+`app/api.py` at `/` — safe now that all REST routes moved to `/api` (M12).
+
+mind-elixir's data model is a strict single-root tree (parent → children),
+not a DAG. Resolution for when that matters (an entity that's a shared
+upstream/downstream of several others, rendered together): render it once
+per branch (duplicated) and draw a dashed cross-link between the duplicate
+instances via mind-elixir's node-linking feature, rather than switching
+renderers. Not needed for M13/M14 below — a single entity's *direct* (1-hop)
+upstream/downstream can't contain the same entity twice, so it's a clean
+tree already. Becomes relevant once a milestone renders multiple entities'
+relations together (transitive/multi-hop graph) — deferred to backlog.
+
+No backend/API changes needed for M13 or M14: `graph_payload` node briefs
+already carry every field the filter panel needs (cluster is the endpoint
+param; database, name, kind, engine, refreshable, labels are per-node), and
+`GET /api/entities/.../relations?direct=true` already returns exactly the
+1-hop upstream/downstream set M14 renders. Filtering is client-side JS over
+an already-fetched cluster payload.
+
+M13 (filter panel) and M14 (direct-relations view) both shipped — see
+Shipped list above. Nothing left planned here; the multi-entity/DAG case
+this section flagged is tracked in Backlog below.
+
 ## Backlog
 
+- **Frontend: transitive/multi-entity graph view**: expand M14 beyond one
+  entity's direct relations — full filtered graph rendering, multi-hop
+  walks, or overlaying several entities at once. This is where the
+  mind-elixir tree-vs-DAG mismatch (see Planned section above) actually
+  bites; needs the cross-link-overlay approach (or a different renderer)
+  implemented, not just decided.
 - **Auth for API/MCP (optional)**: opt-in auth (e.g. bearer token via config)
   guarding mutating endpoints (`POST /sync`, `PUT`/`DELETE /labels`) and
   reads. Off by default — most deployments are localhost-only; a config flag

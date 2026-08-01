@@ -133,14 +133,50 @@ Gotchas discovered during implementation. Append after each task, then compact
   packages = ["app"]`) and resolve paths relative to that, never to a
   repo-root file that isn't part of the wheel.
 
-## Web/UI (removed 2026-07-19, notes kept for future FE work)
+## Web/UI
 
-- Headless UI smoke-testing without installing browsers: playwright pip pkg +
-  `executable_path` to system Chrome. For canvas graphs (cytoscape) expose the
-  instance on `window` and drive nodes via `.emit('tap')` — no DOM to click.
-- First Cytoscape+dagre attempt judged not user-facing ready: chaotic node
-  placement, unreadable on big schemas. Next attempt needs real layout research
-  (ELK? grouping by database? collapsing?), not just a dagre default.
+- First Cytoscape+dagre attempt (removed 2026-07-19) judged not user-facing
+  ready: chaotic node placement, unreadable on big schemas.
+- mind-elixir vendoring (M14): use the npm tarball's `dist/MindElixir.js` —
+  self-contained ESM (`export default`, no bare imports), load with
+  `<script type="module">` + `import MindElixir from '/vendor/mind-elixir.js'`.
+  Skip `dist/MindElixir.iife.js`; its minified global's shape (default export
+  vs. the object itself) isn't worth reverse-engineering when the ESM build
+  is a plain drop-in and the README documents it directly.
+- mind-elixir `toCenter()` (called internally by `init()`/`refresh()`) can
+  measure a stale/zero layout box right after its container goes from
+  `display:none` to visible in the same tick — the fix is calling
+  `requestAnimationFrame(() => mind.toCenter())` once more after
+  `init()`/`refresh()`, not just trusting the internal call.
+- mind-elixir's `selectNodes` bus event hands you the array of `nodeObj`s
+  directly (`nodes[0].id`), not wrapped in `{nodeObj}` — easy to guess wrong
+  by analogy with other libraries' selection events.
+- Headless UI smoke-testing: no project driver exists yet; `npx playwright
+  install chromium` + a throwaway node script (`chromium.launch()` →
+  `newPage()` → `goto()`/`click()`/`screenshot()`) works fine ad hoc against
+  `task up`. Worth turning into a real `run` skill if FE work continues.
+- `StaticFiles(directory=WEB_DIR, html=True)` mounted at `/` replaces a
+  custom `FileResponse` index route *and* a separate `/vendor` mount in one
+  shot: `html=True` serves `index.html` for `/`, and `StaticFiles` already
+  walks nested directories, so `/vendor/mind-elixir.js` and any sibling
+  `app.css`/`app.js` resolve without extra routes. Simpler than it looks —
+  no need to special-case the root path by hand.
+- mind-elixir does not inherit page CSS — it paints `.map-container` from
+  its own theme object (`MindElixir.THEME`/`DARK_THEME`), set once at
+  construction from `options.theme` and pushed live via
+  `mind.changeTheme(...)`. A page-level dark-mode toggle that only flips
+  CSS custom properties will leave the mind map stuck on its construction-
+  time theme — has to be updated explicitly alongside any page theme
+  switch. It also only auto-detects `prefers-color-scheme` once at
+  construction, not reactively; a page's own "auto" mode needs its own
+  `matchMedia(...).addEventListener('change', ...)` to stay in sync.
+- pytest + a real browser needs a real socket — `TestClient` (httpx
+  transport, in-process ASGI calls) has no port a browser can `goto()`.
+  Pattern: `uvicorn.Server(uvicorn.Config(app, port=0, ...))` run via
+  `threading.Thread(target=server.run, daemon=True)`, poll `server.started`,
+  then read the actual bound port from
+  `server.servers[0].sockets[0].getsockname()`. Teardown is
+  `server.should_exit = True` + `thread.join()`.
 
 ## Environment
 

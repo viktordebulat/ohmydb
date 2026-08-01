@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oh-my-db — schema catalog</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/vendor/mind-elixir.css">
+<link rel="stylesheet" href="/app.css">
+<script>
+  // Apply a saved theme choice before first paint (avoids a flash of the
+  // wrong theme); app.js re-applies this on load and keeps it in sync with
+  // the switch's UI state. Key must match THEME_KEY in app.js.
+  try {
+    var savedTheme = localStorage.getItem('oh-my-db-theme');
+    if (savedTheme && savedTheme !== 'auto') document.documentElement.dataset.theme = savedTheme;
+  } catch (e) {}
+</script>
+</head>
+<body>
+
+<header>
+  <h1>oh-my-db</h1>
+  <div class="field">
+    <label for="cluster">cluster</label>
+    <select id="cluster"></select>
+  </div>
+  <span class="sub" id="synced-at"></span>
+  <button id="reload" title="reload the catalog from the DB (does not trigger a sync)">reload</button>
+  <div id="theme-switch" role="group" aria-label="theme">
+    <button type="button" data-theme-choice="auto">auto</button>
+    <button type="button" data-theme-choice="light">light</button>
+    <button type="button" data-theme-choice="dark">dark</button>
+  </div>
+</header>
+
+<div id="filters">
+  <div class="field">
+    <label for="f-database">database</label>
+    <select id="f-database"><option value="">all</option></select>
+  </div>
+  <div class="field">
+    <label for="f-name">name contains</label>
+    <input type="text" id="f-name" placeholder="substring">
+  </div>
+  <div class="field">
+    <label for="f-kind">kind</label>
+    <select id="f-kind"><option value="">all</option></select>
+  </div>
+  <div class="field">
+    <label for="f-engine">engine</label>
+    <select id="f-engine"><option value="">all</option></select>
+  </div>
+  <div class="field">
+    <label for="f-refreshable">refreshable</label>
+    <select id="f-refreshable">
+      <option value="">any</option>
+      <option value="true">yes</option>
+      <option value="false">no</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>labels</label>
+    <div id="label-rows"></div>
+    <button id="label-add" type="button">+ label filter</button>
+  </div>
+</div>
+
+<main id="split">
+  <div id="browse-pane">
+    <div id="status"></div>
+    <table>
+      <thead>
+        <tr><th>name</th><th>database</th><th>kind</th><th>engine</th><th>refreshable</th><th>labels</th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div id="split-handle"></div>
+  <div id="relations">
+    <div id="relations-title-bar">
+      <div id="relations-title"></div>
+      <button id="relations-close" type="button" title="close">×</button>
+    </div>
+    <div id="mindmap"></div>
+  </div>
+</main>
+
+<script type="module" src="/app.js"></script>
+
+</body>
+</html>

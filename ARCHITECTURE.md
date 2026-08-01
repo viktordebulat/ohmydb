@@ -34,7 +34,7 @@ graph, and serves them over HTTP API and MCP for AI agents.
 | `app/migrations` | Alembic migration scripts, shipped inside the package (not repo-root `alembic/`) so they resolve from a non-editable install too | `env.py`, `versions/*.py` | `app/store` |
 | `app/config.py` | Load `config.yaml` → typed config | `load_config()`, `AppConfig` | — |
 | `app/cli.py` | `ohmydb sync\|serve\|mcp` entry point | `main()` | `app/config`, `app/core`, `app/api`, `app/mcp` |
-| `app/api.py` | FastAPI HTTP surface; mounts MCP at `/mcp` | `create_app()` | `app/config`, `app/core`, `app/store`, `app/mcp` |
+| `app/api.py` | FastAPI HTTP surface (routes under `/api`); mounts MCP at `/mcp`; serves the static frontend (`app/web/`) at `/` | `create_app()` | `app/config`, `app/core`, `app/store`, `app/mcp` |
 | `app/mcp.py` | fastmcp server (stdio or mounted over HTTP) | `create_mcp()` | `app/config`, `app/store` |
 
 ## Layering rule
@@ -61,6 +61,8 @@ else must stay database-agnostic (see AGENTS.md rule).
 Unit tests (`tests/`) cover parsing, repo upsert, queries, API, and MCP
 against SQLite — no live DB needed. `tests/test_clickhouse_integration.py`
 runs against a real dockerized ClickHouse and auto-skips when it's not
-reachable (`task test` runs both).
+reachable; `tests/test_web_ui.py` drives the frontend with a headless
+Chromium and auto-skips when Playwright's browser isn't installed
+(`task test` runs all of them).
 
 Gotchas, sharp edges, and past incidents: [docs/LEARNINGS.md](docs/LEARNINGS.md).
