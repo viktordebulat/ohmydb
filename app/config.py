@@ -57,6 +57,11 @@ class AppConfig:
     # Global auto-labeling rules, applied to every cluster before its own
     # label_rules (additive — see app/core/labeling.py).
     label_rules: list[dict] = field(default_factory=list)
+    # Bearer token guarding mutating HTTP endpoints (POST /sync, PUT/DELETE
+    # /labels) — see app/api.py: require_token. None (the default, no yaml
+    # field for it) means auth is off — env-only, like the CH/PG secrets,
+    # so a token never ends up in a mounted config file.
+    auth_token: str | None = None
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -73,6 +78,7 @@ def load_config(path: str | Path) -> AppConfig:
         storage_url=StorageConfig(**raw["storage"]).resolve_url(),
         clusters=clusters,
         label_rules=label_rules,
+        auth_token=os.environ.get("OHMYDB_AUTH_TOKEN") or None,
     )
 
 

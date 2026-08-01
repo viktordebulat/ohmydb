@@ -45,6 +45,19 @@ clusters:
     ]
 
 
+def test_load_config_auth_token_from_env_only(tmp_path, monkeypatch):
+    path = _write(tmp_path, ["prod"])
+
+    monkeypatch.delenv("OHMYDB_AUTH_TOKEN", raising=False)
+    assert load_config(path).auth_token is None
+
+    monkeypatch.setenv("OHMYDB_AUTH_TOKEN", "s3cr3t")
+    assert load_config(path).auth_token == "s3cr3t"
+
+    monkeypatch.setenv("OHMYDB_AUTH_TOKEN", "")  # empty env var == unset, not an empty-string token
+    assert load_config(path).auth_token is None
+
+
 def test_load_config_rejects_unknown_label_rule_match_key(tmp_path):
     path = tmp_path / "config.yaml"
     path.write_text("""

@@ -3,7 +3,7 @@ static frontend."""
 
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -37,6 +37,17 @@ def create_app(cfg: AppConfig) -> FastAPI:
 
     api = APIRouter(prefix="/api")
 
+    def require_token(authorization: str | None = Header(default=None)) -> None:
+        """Guards mutating routes only (POST /sync, PUT/DELETE /labels) — a
+        dependency, not global middleware, so reads stay open even when a
+        token is configured. No-op (auth off) when cfg.auth_token is unset,
+        which is the default — this is opt-in for deployments exposed past
+        localhost, not a requirement for local dev."""
+        if cfg.auth_token is None:
+            return
+        if authorization != f"Bearer {cfg.auth_token}":
+            raise HTTPException(status_code=401, detail="missing or invalid bearer token")
+
     @api.get("/clusters")
     def clusters() -> list[str]:
         return [c.name for c in cfg.clusters]
@@ -62,20 +73,20 @@ def create_app(cfg: AppConfig) -> FastAPI:
             raise HTTPException(status_code=404, detail="entity not found")
         return payload
 
-    @api.put("/labels/{cluster}/{database}/{table}")
+    @api.put("/labels/{cluster}/{database}/{table}", dependencies=[Depends(require_token)])
     def put_label(cluster: str, database: str, table: str, body: LabelBody) -> dict:
         with factory() as s:
             set_label(s, cluster, database, table, body.key, body.value)
         return {"ok": True}
 
-    @api.delete("/labels/{cluster}/{database}/{table}/{key}")
+    @api.delete("/labels/{cluster}/{database}/{table}/{key}", dependencies=[Depends(require_token)])
     def remove_label(cluster: str, database: str, table: str, key: str) -> dict:
         with factory() as s:
             if not delete_label(s, cluster, database, table, key):
                 raise HTTPException(status_code=404, detail="label not found")
         return {"ok": True}
 
-    @api.post("/sync")
+    @api.post("/sync", dependencies=[Depends(require_token)])
     def sync(cluster: str | None = None) -> dict:
         try:
             results = run_sync(cfg, only_cluster=cluster)

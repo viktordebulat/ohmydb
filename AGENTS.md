@@ -47,6 +47,10 @@ Config/deploy notes not covered there:
   `storage` block: `type: sqlite` (local debug, set `url`) or `type: postgres`
   (prod, set `host`/`port`/`username`/`password`/`database`); `POSTGRES_USER`/
   `POSTGRES_PASSWORD` env override the postgres secrets, same pattern as CH.
+  `OHMYDB_AUTH_TOKEN` (env-only, no yaml field) enables bearer-token auth on
+  the three mutating HTTP routes (`POST /sync`, `PUT`/`DELETE /labels`) —
+  unset by default, reads/MCP unaffected either way. See README's Auth
+  section for the request example.
 - `.mcp.json.example` — MCP registration for AI coding agents: `cp .mcp.json.example .mcp.json` (`.mcp.json` itself is gitignored). Two entries: `ohmydb` (stdio, spawns `uv run ohmydb mcp`; add `--project <path>` to `args` when registering globally) and `ohmydb-http` (connects to a running `serve` at `http://127.0.0.1:8080/mcp/`). Keep one, drop the other.
 - `docker-compose.yaml` + `seed/` — local ClickHouse with sample schema for testing.
 

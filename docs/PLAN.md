@@ -265,6 +265,41 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
     (legend + node swatches, colors match between the two), value-only node
     display, light/dark swatch recolor on theme switch, and the drag-resize
     fix above.
+- **M19 (2026-08-01)**: optional bearer-token auth on mutating HTTP routes
+  (`app/api.py`: `require_token` dependency via `Depends(...)`, applied
+  per-route — `dependencies=[Depends(require_token)]` on `POST /sync` and
+  `PUT`/`DELETE /labels` only, not router-wide, so reads stay open even
+  with a token configured). `AppConfig.auth_token` (`app/config.py`) comes
+  from `OHMYDB_AUTH_TOKEN` env only — no yaml field, same "secrets never
+  live in the mounted config" pattern as the CH/PG credentials — `None`
+  (unset) means auth off, the default; empty-string env value also treated
+  as unset. MCP and all `GET` routes are deliberately never gated by this
+  token — a conscious scope choice (matches what was asked this round),
+  not an oversight; network/proxy-level auth (Pomerium, per README) is the
+  answer if those need to be private too.
+  - Security evaluation done first (that was the actual ask, not just "add
+    a token"): checked for CORS middleware (none configured) and reasoned
+    through what's exploitable without one. `PUT`/`DELETE` are inherently
+    safe from pure-browser CSRF even pre-token — those methods always
+    require a CORS preflight, which fails closed with no `Access-Control-
+    Allow-*` headers configured, so a cross-origin page's fetch/XHR never
+    reaches the server. `POST /api/sync` was the real gap: browsers always
+    send simple cross-origin POSTs (an auto-submitting HTML form, or
+    `fetch` with `mode:'no-cors'` and a simple content-type) without any
+    preflight — SOP only blocks the attacker page from *reading* the JSON
+    response, not the side effect from happening. Since `/api/sync` takes
+    no body (just an optional `?cluster=` query param), that's a real,
+    zero-interaction CSRF path against anyone with the service reachable
+    on their network while browsing anywhere else — not a caching issue,
+    a request-forgery one. The token closes exactly this gap.
+  - Verified: existing mutating-route tests (`test_labels_crud`,
+    `test_sync_endpoint`) pass unmodified with no token configured (off by
+    default, confirmed not a breaking change); new
+    `test_auth_token_guards_mutating_routes_only` covers missing token,
+    wrong token, wrong scheme (`Authorization: s3cr3t` without the
+    `Bearer ` prefix), reads staying open, and the correct token
+    succeeding on all three routes; `test_load_config_auth_token_from_env_only`
+    covers unset/set/empty-string env var.
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
@@ -310,10 +345,6 @@ this section flagged is tracked in Backlog below.
   mind-elixir tree-vs-DAG mismatch (see Planned section above) actually
   bites; needs the cross-link-overlay approach (or a different renderer)
   implemented, not just decided.
-- **Auth for API/MCP (optional)**: opt-in auth (e.g. bearer token via config)
-  guarding mutating endpoints (`POST /sync`, `PUT`/`DELETE /labels`) and
-  reads. Off by default — most deployments are localhost-only; a config flag
-  turns it on for anything exposed past that.
 - **`find_tables`/`q` scale**: `app/store/queries.py: list_entities` loads
   every entity across all clusters into memory and filters in Python (via
   `_matches`), no limit/pagination. Fine at current catalog size; add a
