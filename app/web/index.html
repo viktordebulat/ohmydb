@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>oh-my-db — schema catalog</title>
 <link rel="icon" href="data:,">
+<link rel="stylesheet" href="/vendor/mind-elixir.css">
 <style>
   :root {
     color-scheme: light;
@@ -72,11 +73,16 @@
     font-size: 11px; color: var(--ink-2); background: var(--page);
   }
   #status { color: var(--muted); font-size: 12px; padding: 4px 2px; }
-  #detail {
-    margin-top: 14px; padding: 10px 12px; border: 1px solid var(--grid); border-radius: 8px;
-    background: var(--surface); font-size: 12.5px; color: var(--ink-2); display: none;
+  #relations {
+    margin-top: 14px; border: 1px solid var(--grid); border-radius: 8px;
+    background: var(--surface); display: none; overflow: hidden;
   }
-  #detail.open { display: block; }
+  #relations.open { display: block; }
+  #relations-title {
+    padding: 8px 12px; font-size: 12.5px; color: var(--ink-2);
+    border-bottom: 1px solid var(--grid);
+  }
+  #mindmap { height: 480px; width: 100%; }
 </style>
 </head>
 <body>
@@ -131,16 +137,23 @@
     </thead>
     <tbody id="rows"></tbody>
   </table>
-  <div id="detail"></div>
+  <div id="relations">
+    <div id="relations-title"></div>
+    <div id="mindmap"></div>
+  </div>
 </main>
 
-<script>
+<script type="module">
+  import MindElixir from '/vendor/mind-elixir.js';
+
   const clusterSel = document.getElementById('cluster');
   const refreshBtn = document.getElementById('refresh');
   const syncedAtEl = document.getElementById('synced-at');
   const statusEl = document.getElementById('status');
   const rowsEl = document.getElementById('rows');
-  const detailEl = document.getElementById('detail');
+  const relationsEl = document.getElementById('relations');
+  const relationsTitleEl = document.getElementById('relations-title');
+  const mindmapEl = document.getElementById('mindmap');
 
   const fDatabase = document.getElementById('f-database');
   const fName = document.getElementById('f-name');
@@ -226,15 +239,86 @@
       </tr>`).join('');
   }
 
+  const ENTITY_PREFIX = 'e:';
+  const entityId = (cluster, database, name) => `${ENTITY_PREFIX}${cluster}::${database}::${name}`;
+  const parseEntityId = (id) => {
+    const [cluster, database, name] = id.slice(ENTITY_PREFIX.length).split('::');
+    return { cluster, database, name };
+  };
+  const nodeLabel = (e) => `${e.name}\n${e.kind}${e.engine ? ' · ' + e.engine : ''}`;
+
+  let mind = null;
+
+  function relationsToMindData(cluster, database, name, rel) {
+    const branch = (title, entries, idPrefix) => ({
+      id: `g:${idPrefix}`,
+      topic: `${title} (${entries.length})`,
+      children: entries.map(e => ({
+        id: entityId(e.cluster, e.database, e.name),
+        topic: nodeLabel(e),
+      })),
+    });
+    return {
+      nodeData: {
+        id: entityId(cluster, database, name),
+        topic: nodeLabel(rel.entity),
+        children: [
+          branch('Upstream', rel.upstream, 'upstream'),
+          branch('Downstream', rel.downstream, 'downstream'),
+        ],
+      },
+    };
+  }
+
+  async function showRelations(cluster, database, name) {
+    relationsEl.className = 'open';
+    relationsTitleEl.textContent = `loading relations for ${cluster}/${database}/${name}…`;
+    const res = await fetch(
+      `/api/entities/${encodeURIComponent(cluster)}/${encodeURIComponent(database)}/${encodeURIComponent(name)}/relations?direct=true`
+    );
+    if (!res.ok) {
+      relationsTitleEl.textContent = `no relations found for ${cluster}/${database}/${name}`;
+      return;
+    }
+    const rel = await res.json();
+    relationsTitleEl.textContent =
+      `${cluster}/${database}/${name} — direct relations (click a node to re-center)`;
+
+    const data = relationsToMindData(cluster, database, name, rel);
+    if (!mind) {
+      mind = new MindElixir({
+        el: mindmapEl,
+        direction: MindElixir.SIDE,
+        editable: false,
+        toolBar: false,
+        contextMenu: false,
+        keypress: false,
+      });
+      mind.init(data);
+      mind.bus.addListener('selectNodes', (selected) => {
+        const id = selected?.[0]?.id;
+        if (id && id.startsWith(ENTITY_PREFIX) && id !== mind.nodeData.id) {
+          const { cluster, database, name } = parseEntityId(id);
+          showRelations(cluster, database, name);
+        }
+      });
+    } else {
+      mind.refresh(data);
+    }
+    // toCenter() runs during init/refresh, but el's layout box isn't
+    // reliably final until after the next paint (freshly un-hidden
+    // container, or a resize from the previous tree) — recenter once more
+    // post-layout.
+    requestAnimationFrame(() => mind.toCenter());
+  }
+
   rowsEl.addEventListener('click', (e) => {
     const tr = e.target.closest('tr');
     if (!tr) return;
     rowsEl.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
     tr.classList.add('selected');
     const { cluster, database, name } = tr.dataset;
-    detailEl.className = 'open';
-    detailEl.textContent =
-      `selected ${cluster}/${database}/${name} — relations view not yet implemented (M14)`;
+    showRelations(cluster, database, name);
   });
 
   clusterSel.addEventListener('change', () => loadGraph(clusterSel.value));

@@ -134,6 +134,22 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   browser against `task up`'s seeded ClickHouse: each filter dimension
   exercised, row counts confirmed correct, no console errors, screenshots
   checked.
+- **M14 (2026-08-01)**: direct-relations view. Row click fetches
+  `GET /api/entities/{cluster}/{database}/{name}/relations?direct=true` and
+  renders a mind-elixir tree via the vendored `app/web/vendor/mind-elixir.js`/
+  `.css` (MIT, from `mind-elixir` npm's ESM `dist/MindElixir.js` build —
+  self-contained, no bare imports); `app/api.py` gained
+  `app.mount("/vendor", StaticFiles(...))` to serve it. Root = the selected
+  entity (`name`/`kind`/`engine` in the label), two child branches
+  "Upstream (n)"/"Downstream (n)" populated from the response. Clicking a
+  rendered entity node re-centers (refetches that node's own direct
+  relations, `mind.refresh()`s the tree) via mind-elixir's `selectNodes` bus
+  event, filtered to ids prefixed `e:` (group nodes "Upstream"/"Downstream"
+  use a `g:` prefix and are inert, so clicking them is a no-op). Verified
+  with a headless browser against `task up`'s seeded ClickHouse: rendered
+  root/branch/leaf text cross-checked against the same entity's raw
+  `relations?direct=true` JSON, re-centering confirmed by clicking a leaf
+  node, zero console errors.
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
@@ -167,24 +183,9 @@ param; database, name, kind, engine, refreshable, labels are per-node), and
 1-hop upstream/downstream set M14 renders. Filtering is client-side JS over
 an already-fetched cluster payload.
 
-M13 (filter panel) shipped — see Shipped list above. Remaining:
-
-- **M14 (planned): direct-relations view.** Selecting an entity (from M13,
-  or a future search box) fetches
-  `GET /api/entities/{cluster}/{database}/{name}/relations?direct=true` and
-  renders a mind-elixir tree: root = the selected entity (name/kind/engine
-  in the label); two child branches "Upstream" and "Downstream" (grouping
-  nodes, not clickable entities themselves), each populated from the
-  matching list in the response. Empty branch is either omitted or shown
-  empty — no error state, 0 upstream/downstream is a normal case (source
-  tables, terminal consumers).
-  - Clicking a rendered entity node re-centers: fetch its own direct
-    relations and re-render the tree around it — cheap graph walking
-    without full multi-hop/DAG rendering.
-  - Acceptance: manual QA against the seeded ClickHouse — pick an MV with
-    known upstream sources and downstream consumers, confirm the rendered
-    tree matches `GET .../relations?direct=true`'s JSON exactly (same
-    entities, no extras, no drops).
+M13 (filter panel) and M14 (direct-relations view) both shipped — see
+Shipped list above. Nothing left planned here; the multi-entity/DAG case
+this section flagged is tracked in Backlog below.
 
 ## Backlog
 

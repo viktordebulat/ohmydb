@@ -48,6 +48,15 @@ All paths below are under `/api`.
 | `DELETE` | `/api/labels/{cluster}/{database}/{table}/{key}` | Remove a label. |
 | `POST` | `/api/sync` | Re-introspect clusters. Optional `?cluster=<name>`. |
 
+## Frontend
+
+`GET /` serves a small static page (`app/web/index.html`, no build step)
+for browsing the catalog: pick a cluster, filter entities by database/
+name/kind/engine/refreshable/labels, click one to see its direct
+upstream/downstream relations as a mind map (via the vendored
+[mind-elixir](https://github.com/SSShooter/mind-elixir-core)). Click any
+node in the map to re-center on it.
+
 ## Labels: manual vs. auto
 
 Labels can be set by hand (`PUT /labels`) or derived automatically at sync

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.config import AppConfig
@@ -93,4 +94,5 @@ def create_app(cfg: AppConfig) -> FastAPI:
     def index() -> FileResponse:
         return FileResponse(WEB_DIR / "index.html")
 
+    app.mount("/vendor", StaticFiles(directory=WEB_DIR / "vendor"), name="vendor")
     return app
