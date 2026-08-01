@@ -218,6 +218,53 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   `Downstream (0)`). Deliberately just a smoke pass, not full UI coverage —
   matches AGENTS.md's "minimal test coverage" rule; the manual
   headless-browser pass per milestone still exists for anything deeper.
+- **M18 (2026-08-01)**: labels on the graph. Node topics switched from plain
+  text to HTML (`app/web/app.js`: `new MindElixir({..., markdown: (text) =>
+  text, ...})` — an identity function is enough to opt into mind-elixir's
+  `innerHTML` topic path instead of `textContent`) so each entity's labels
+  render as one swatch+value line per label, colored by key. Colors come
+  from the dataviz skill's validated default categorical palette
+  (`references/palette.md` — same slots this page's own light/dark surface
+  vars already use); a label key is assigned the next unused palette slot
+  the first time it's seen and keeps it for the session (`labelKeyOrder` in
+  `app.js`), never reassigned. A small translucent legend block floats
+  top-left over the graph (`#legend`, `position: absolute`, background
+  `color-mix(in srgb, var(--surface) 70%, transparent)`) mapping key →
+  swatch; nodes show only the label *value* next to the matching swatch
+  (key isn't repeated on the node — it's a `title` tooltip instead), per
+  the dataviz skill's "identity is carried by the mark, text stays in
+  normal ink" rule. A `lastRel` cache lets a theme switch rebuild the
+  current tree's topics/legend from cached data (no refetch) so swatch
+  colors track light/dark too — `mind.refresh()` alone doesn't push a
+  theme change, so `renderTree`'s reuse branch also calls
+  `mind.changeTheme()` explicitly (gap found and fixed the same pass).
+  Also fixed a pre-existing stored-XSS gap noticed while adding HTML
+  escaping for the new label swatches: the browse-pane table's `innerHTML`
+  interpolated entity/label values unescaped — labels are attacker-settable
+  via `PUT /api/labels` with no validation. All of `render()`'s
+  interpolation now goes through a shared `escapeHtml()`.
+  - Real bug caught only by measuring live (not by eyeballing a static
+    screenshot): dragging the split handle to grow the relations pane left
+    the mind-elixir canvas its *original* size, background included — a
+    visible seam of the wrong shade below the frozen map. Root cause: the
+    new `#mindmap-area` wrapper (added this milestone so `#legend` could
+    float over the graph) sized `#mindmap` via `position: absolute;
+    inset: 0`, but mind-elixir's own constructor unconditionally sets
+    `style.position = "relative"` on whatever element it's given — an
+    inline style, so it silently wins over the stylesheet's `absolute` and
+    `inset: 0` does nothing. Fix: `#mindmap-area` became `display: flex`
+    and `#mindmap` just `flex: 1` — flex sizing doesn't care about the
+    `position` property, so it fills correctly regardless of mind-elixir's
+    override. Confirmed via `getBoundingClientRect()` on `#mindmap-area`,
+    `#mindmap`, and `.map-container` before/mid/after a scripted drag (all
+    three now track exactly), not just a background-color check (which
+    passed even on the broken version, since `#mindmap-area`'s own
+    background was fine — mind-elixir's inner canvas is what wasn't
+    resizing).
+  - Verified with a headless browser: multi-label/multi-key rendering
+    (legend + node swatches, colors match between the two), value-only node
+    display, light/dark swatch recolor on theme switch, and the drag-resize
+    fix above.
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,

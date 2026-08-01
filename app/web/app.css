@@ -112,4 +112,29 @@ tbody tr.selected { background: var(--border); }
   color: var(--muted);
 }
 #relations-close:hover { color: var(--ink); border-color: transparent; }
+
+/* mind-elixir hardcodes style.position="relative" on the element it's
+   given (see vendor/mind-elixir.js's constructor) — an absolute+inset:0
+   child here gets silently overridden and stops tracking the parent's
+   size on drag. Flex sizing doesn't care about the `position` property,
+   so #mindmap just flex:1-fills #mindmap-area instead. Explicit
+   background on the wrapper too, so there's no gap-flash regardless. */
+#mindmap-area { position: relative; display: flex; flex: 1; min-height: 0; background: var(--surface); }
 #mindmap { flex: 1; min-height: 0; width: 100%; }
+
+/* small translucent block, floated over the top-left of the graph */
+#legend {
+  display: none; flex-direction: column; gap: 5px;
+  position: absolute; top: 10px; left: 10px; z-index: 5;
+  padding: 6px 10px; border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  font-size: 11px; color: var(--ink-2);
+}
+.legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.legend-swatch, .tpc-swatch {
+  display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0;
+}
+
+/* label lines injected into node topics (see nodeTopicHtml in app.js) */
+#mindmap .tpc-sub { font-size: 0.75em; opacity: 0.75; }
+#mindmap .tpc-label { display: flex; align-items: center; gap: 4px; font-size: 0.7em; opacity: 0.9; margin-top: 2px; }
