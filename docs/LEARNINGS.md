@@ -155,6 +155,12 @@ Gotchas discovered during implementation. Append after each task, then compact
   install chromium` + a throwaway node script (`chromium.launch()` →
   `newPage()` → `goto()`/`click()`/`screenshot()`) works fine ad hoc against
   `task up`. Worth turning into a real `run` skill if FE work continues.
+- `StaticFiles(directory=WEB_DIR, html=True)` mounted at `/` replaces a
+  custom `FileResponse` index route *and* a separate `/vendor` mount in one
+  shot: `html=True` serves `index.html` for `/`, and `StaticFiles` already
+  walks nested directories, so `/vendor/mind-elixir.js` and any sibling
+  `app.css`/`app.js` resolve without extra routes. Simpler than it looks —
+  no need to special-case the root path by hand.
 
 ## Environment
 

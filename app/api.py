@@ -4,7 +4,6 @@ static frontend."""
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, HTTPException
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -90,9 +89,7 @@ def create_app(cfg: AppConfig) -> FastAPI:
 
     app.include_router(api)
 
-    @app.get("/", include_in_schema=False)
-    def index() -> FileResponse:
-        return FileResponse(WEB_DIR / "index.html")
-
-    app.mount("/vendor", StaticFiles(directory=WEB_DIR / "vendor"), name="vendor")
+    # Single mount covers index.html at "/" (html=True), app.css/app.js, and
+    # vendor/* (StaticFiles serves nested dirs) — no separate index route needed.
+    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
     return app

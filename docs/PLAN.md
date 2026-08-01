@@ -150,6 +150,30 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   root/branch/leaf text cross-checked against the same entity's raw
   `relations?direct=true` JSON, re-centering confirmed by clicking a leaf
   node, zero console errors.
+- **M15 (2026-08-01)**: frontend UI pass. `app/web/index.html` split into
+  `app.css`/`app.js` (thin HTML shell); `app/api.py`'s serving simplified to
+  one `app.mount("/", StaticFiles(directory=WEB_DIR, html=True))` —
+  supersedes M13/M14's custom index route + separate `/vendor` mount
+  (`StaticFiles` serves nested dirs and `html=True` covers `/` → `index.html`
+  on its own). Header reordered: refresh button is now the rightmost
+  element, synced-at immediately left of it. Relations panel gained a close
+  button (`×`, hides the panel; the `mind` instance stays alive for cheap
+  reopening). Graph node labels show `database` instead of `kind` (kind was
+  redundant with the branch grouping; database wasn't shown anywhere in the
+  tree before). Layout rebuilt as a fixed-height app shell (`body{overflow:
+  hidden}`, `#split` flex column) so the browse pane (filters+table) and the
+  relations pane can be resized against each other via a `row-resize` drag
+  handle (`#split-handle`, plain pointer events, no library — the handle
+  only appears once relations is open, and dragging just sets an explicit
+  px `flex-basis` on the browse pane while the relations pane keeps
+  `flex:1` to fill the remainder). `#filters` capped at `max-height:200px`
+  with its own scroll so a long label-filter list can't push the rest of
+  the page around. `render()` still has no pagination/limit — the browse
+  pane scrolls independently so the full filtered result set is always in
+  the DOM. Verified with a headless browser against `task up`: asset
+  content-types confirmed, header order, database-in-label, drag-resize
+  (measured browse-pane height change), close-then-reopen, zero console
+  errors.
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
