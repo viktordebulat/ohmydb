@@ -61,6 +61,8 @@ else must stay database-agnostic (see AGENTS.md rule).
 Unit tests (`tests/`) cover parsing, repo upsert, queries, API, and MCP
 against SQLite — no live DB needed. `tests/test_clickhouse_integration.py`
 runs against a real dockerized ClickHouse and auto-skips when it's not
-reachable (`task test` runs both).
+reachable; `tests/test_web_ui.py` drives the frontend with a headless
+Chromium and auto-skips when Playwright's browser isn't installed
+(`task test` runs all of them).
 
 Gotchas, sharp edges, and past incidents: [docs/LEARNINGS.md](docs/LEARNINGS.md).

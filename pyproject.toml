@@ -15,7 +15,11 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["httpx2>=2.9.1", "pytest>=9.1.1"]
+dev = [
+    "httpx2>=2.9.1",
+ "playwright>=1.62.0",
+ "pytest>=9.1.1",
+]
 
 [project.scripts]
 ohmydb = "app.cli:main"

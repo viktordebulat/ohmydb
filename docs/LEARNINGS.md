@@ -170,6 +170,13 @@ Gotchas discovered during implementation. Append after each task, then compact
   switch. It also only auto-detects `prefers-color-scheme` once at
   construction, not reactively; a page's own "auto" mode needs its own
   `matchMedia(...).addEventListener('change', ...)` to stay in sync.
+- pytest + a real browser needs a real socket — `TestClient` (httpx
+  transport, in-process ASGI calls) has no port a browser can `goto()`.
+  Pattern: `uvicorn.Server(uvicorn.Config(app, port=0, ...))` run via
+  `threading.Thread(target=server.run, daemon=True)`, poll `server.started`,
+  then read the actual bound port from
+  `server.servers[0].sockets[0].getsockname()`. Teardown is
+  `server.should_exit = True` + `thread.join()`.
 
 ## Environment
 

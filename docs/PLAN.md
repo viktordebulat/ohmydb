@@ -203,6 +203,21 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
     map's own computed `background-color` (not just the page chrome) to
     catch exactly the gotcha above; back to "auto" clears the `data-theme`
     attribute; fresh OS=light context defaults to light.
+- **M17 (2026-08-01)**: UI smoke tests, `tests/test_web_ui.py`. `playwright`
+  added as a dev dependency (`uv add --group dev playwright`, one-time
+  `uv run playwright install chromium`) — auto-skips like
+  `test_clickhouse_integration.py` when Chromium isn't installed (checked by
+  actually launching+closing it once), so `Dockerfile.example`'s test stage
+  (no browser, no network) still passes. A `live_server` fixture runs
+  `uvicorn.Server` in a background thread on a random port — `TestClient`
+  can't be pointed to by a real browser, it's in-process HTTP only — seeded
+  with the same events→mv fixture shape as `test_api.py`. Two tests: table
+  renders both seeded entities; clicking a row renders the mind-elixir tree
+  with the right root topic (`mv\nanalytics`, confirming M15's
+  database-over-kind label) and branch counts (`Upstream (1)`,
+  `Downstream (0)`). Deliberately just a smoke pass, not full UI coverage —
+  matches AGENTS.md's "minimal test coverage" rule; the manual
+  headless-browser pass per milestone still exists for anything deeper.
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
