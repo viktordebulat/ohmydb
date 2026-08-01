@@ -1,7 +1,7 @@
 """baseline
 
 Revision ID: fae779e73740
-Revises: 
+Revises:
 Create Date: 2026-07-25 18:04:47.066202
 
 """

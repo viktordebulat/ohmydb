@@ -382,7 +382,7 @@ const Pt = function(e) {
   color:${l.color};
   font-size:${l.fontSize};
   padding:${l.padding};
-  margin:${l.margin}; 
+  margin:${l.margin};
   background-color:${l.backgroundColor !== "rgba(0, 0, 0, 0)" && l.backgroundColor};
   border: ${l.border};
   border-radius:${l.borderRadius}; `, this.direction === 0 && (t.style.right = "0"), e.style.opacity = "0", Qe(t), this.bus.fire("operation", {
@@ -1243,7 +1243,7 @@ const M = "http://www.w3.org/2000/svg", le = function(e) {
   const s = t.cloneNode(!0);
   e.nodes.appendChild(s), s.id = "input-box", s.textContent = o, s.contentEditable = "plaintext-only", s.spellcheck = !1, s.style.cssText = `
     left:${t.style.left};
-    top:${t.style.top}; 
+    top:${t.style.top};
     max-width: 200px;
   `, Qe(s), e.scrollIntoView(s), s.addEventListener("keydown", (i) => {
     if (i.stopPropagation(), i.isComposing) return;
