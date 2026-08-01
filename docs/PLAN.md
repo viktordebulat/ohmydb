@@ -174,6 +174,35 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   content-types confirmed, header order, database-in-label, drag-resize
   (measured browse-pane height change), close-then-reopen, zero console
   errors.
+- **M16 (2026-08-01)**: light/dark/auto theme switch, top-right corner of
+  the header (rightmost — after the M15 refresh button). Page CSS vars
+  restructured to a 3-way selector split: base `:root` = light, `@media
+  (prefers-color-scheme: dark) { :root:not([data-theme]) {...} }` = auto
+  following the OS, `:root[data-theme="dark"] {...}` = explicit override
+  independent of OS (explicit "light" needs no separate block — it's just
+  the base `:root` values with `:not([data-theme])` no longer matching, so
+  the media-query override is skipped). Choice persisted to
+  `localStorage["oh-my-db-theme"]`; a small inline script in `index.html`'s
+  `<head>` applies a saved non-auto choice before first paint (avoids a
+  flash of the wrong theme) — its hardcoded key literal has to match
+  `THEME_KEY` in `app.js` (documented in both places, no clean way to share
+  a constant between an inline `<head>` script and an ES module without
+  more machinery than this is worth).
+  - Gotcha caught after first pass: mind-elixir renders into its own
+    `.map-container` with its own theme object (bgcolor/text color per
+    node) — it does not inherit the page's CSS custom properties, so the
+    graph stayed light while the rest of the page went dark. Fixed by
+    passing `theme: MindElixir.THEME`/`DARK_THEME` at construction and
+    calling `mind.changeTheme(...)` from `applyTheme()` on every switch
+    click, plus a `prefers-color-scheme` `MediaQueryList` change listener
+    so "auto" also reacts to a live OS theme flip (mind-elixir only
+    auto-detects the OS preference once, at construction).
+  - Verified with a headless browser against `task up`: OS=dark defaults
+    to dark with no saved choice; explicit "light" click overrides OS=dark;
+    choice survives reload; explicit "dark" click confirmed via the mind
+    map's own computed `background-color` (not just the page chrome) to
+    catch exactly the gotcha above; back to "auto" clears the `data-theme`
+    attribute; fresh OS=light context defaults to light.
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,

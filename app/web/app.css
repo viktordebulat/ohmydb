@@ -1,4 +1,6 @@
 :root {
+  /* light is the default (also the explicit "light" choice — data-theme="light"
+     just opts out of the two rules below, no separate override block needed) */
   color-scheme: light;
   --surface: #fcfcfb;
   --page: #f9f9f7;
@@ -9,8 +11,9 @@
   --border: rgba(11, 11, 11, 0.10);
   --accent: #2a78d6;
 }
+/* auto (no explicit choice): follow the OS. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     color-scheme: dark;
     --surface: #1a1a19;
     --page: #0d0d0d;
@@ -21,6 +24,18 @@
     --border: rgba(255, 255, 255, 0.10);
     --accent: #3987e5;
   }
+}
+/* explicit "dark" choice: same values, independent of OS preference. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #1a1a19;
+  --page: #0d0d0d;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --border: rgba(255, 255, 255, 0.10);
+  --accent: #3987e5;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -35,6 +50,13 @@ header {
 }
 header h1 { font-size: 15px; margin: 0; font-weight: 650; }
 header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+#theme-switch { display: flex; border: 1px solid var(--grid); border-radius: 6px; overflow: hidden; }
+#theme-switch button {
+  border: 0; border-radius: 0; padding: 5px 9px; background: var(--page); color: var(--muted);
+}
+#theme-switch button + button { border-left: 1px solid var(--grid); }
+#theme-switch button:hover { background: var(--surface); color: var(--ink); }
+#theme-switch button.active { background: var(--border); color: var(--ink); }
 select, input[type=text], button {
   padding: 5px 9px; border: 1px solid var(--grid); border-radius: 6px;
   background: var(--page); color: var(--ink); font: inherit; font-size: 12.5px;

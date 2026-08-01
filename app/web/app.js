@@ -11,6 +11,7 @@ const splitHandleEl = document.getElementById('split-handle');
 const relationsTitleEl = document.getElementById('relations-title');
 const relationsCloseBtn = document.getElementById('relations-close');
 const mindmapEl = document.getElementById('mindmap');
+const themeSwitchEl = document.getElementById('theme-switch');
 
 const fDatabase = document.getElementById('f-database');
 const fName = document.getElementById('f-name');
@@ -108,6 +109,15 @@ const nodeLabel = (e) => `${e.name}\n${e.database}${e.engine ? ' · ' + e.engine
 
 let mind = null;
 
+// mind-elixir renders into its own `.map-container`, styled via its own
+// theme object (bgcolor/color per node) — it doesn't inherit our page's
+// CSS custom properties, so switching #theme-switch has to also push a
+// matching MindElixir.THEME/DARK_THEME into the mind instance explicitly.
+const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+let currentTheme = 'auto';
+const isDarkActive = () => currentTheme === 'dark' || (currentTheme === 'auto' && prefersDark.matches);
+const mindTheme = () => (isDarkActive() ? MindElixir.DARK_THEME : MindElixir.THEME);
+
 function relationsToMindData(cluster, database, name, rel) {
   const branch = (title, entries, idPrefix) => ({
     id: `g:${idPrefix}`,
@@ -148,6 +158,7 @@ async function showRelations(cluster, database, name) {
     mind = new MindElixir({
       el: mindmapEl,
       direction: MindElixir.SIDE,
+      theme: mindTheme(),
       editable: false,
       toolBar: false,
       contextMenu: false,
@@ -211,5 +222,35 @@ refreshBtn.addEventListener('click', () => loadGraph(clusterSel.value));
 [fDatabase, fName, fKind, fEngine, fRefreshable].forEach(el =>
   el.addEventListener('input', render));
 labelAddBtn.addEventListener('click', addLabelRow);
+
+// Key must match the inline anti-FOUC script in index.html's <head>.
+const THEME_KEY = 'oh-my-db-theme';
+
+function applyTheme(theme) {
+  currentTheme = theme;
+  if (theme === 'auto') {
+    delete document.documentElement.dataset.theme;
+  } else {
+    document.documentElement.dataset.theme = theme;
+  }
+  themeSwitchEl.querySelectorAll('button').forEach(b =>
+    b.classList.toggle('active', b.dataset.themeChoice === theme));
+  if (mind) mind.changeTheme(mindTheme());
+}
+
+themeSwitchEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const theme = btn.dataset.themeChoice;
+  localStorage.setItem(THEME_KEY, theme);
+  applyTheme(theme);
+});
+
+// Only matters in "auto": OS preference can change without a page reload.
+prefersDark.addEventListener('change', () => {
+  if (currentTheme === 'auto') applyTheme('auto');
+});
+
+applyTheme(localStorage.getItem(THEME_KEY) || 'auto');
 
 loadClusters();

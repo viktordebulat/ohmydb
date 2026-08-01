@@ -7,6 +7,15 @@
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/vendor/mind-elixir.css">
 <link rel="stylesheet" href="/app.css">
+<script>
+  // Apply a saved theme choice before first paint (avoids a flash of the
+  // wrong theme); app.js re-applies this on load and keeps it in sync with
+  // the switch's UI state. Key must match THEME_KEY in app.js.
+  try {
+    var savedTheme = localStorage.getItem('oh-my-db-theme');
+    if (savedTheme && savedTheme !== 'auto') document.documentElement.dataset.theme = savedTheme;
+  } catch (e) {}
+</script>
 </head>
 <body>
 
@@ -18,6 +27,11 @@
   </div>
   <span class="sub" id="synced-at"></span>
   <button id="refresh">refresh</button>
+  <div id="theme-switch" role="group" aria-label="theme">
+    <button type="button" data-theme-choice="auto">auto</button>
+    <button type="button" data-theme-choice="light">light</button>
+    <button type="button" data-theme-choice="dark">dark</button>
+  </div>
 </header>
 
 <div id="filters">

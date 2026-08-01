@@ -161,6 +161,15 @@ Gotchas discovered during implementation. Append after each task, then compact
   walks nested directories, so `/vendor/mind-elixir.js` and any sibling
   `app.css`/`app.js` resolve without extra routes. Simpler than it looks —
   no need to special-case the root path by hand.
+- mind-elixir does not inherit page CSS — it paints `.map-container` from
+  its own theme object (`MindElixir.THEME`/`DARK_THEME`), set once at
+  construction from `options.theme` and pushed live via
+  `mind.changeTheme(...)`. A page-level dark-mode toggle that only flips
+  CSS custom properties will leave the mind map stuck on its construction-
+  time theme — has to be updated explicitly alongside any page theme
+  switch. It also only auto-detects `prefers-color-scheme` once at
+  construction, not reactively; a page's own "auto" mode needs its own
+  `matchMedia(...).addEventListener('change', ...)` to stay in sync.
 
 ## Environment
 
