@@ -1,3 +1,9 @@
+# Optional: set OHMYDB_AUTH_TOKEN to require `Authorization: Bearer <token>`
+# on mutating HTTP endpoints (POST /api/sync, PUT/DELETE /api/labels). Reads
+# and MCP stay open regardless. Unset (the default) = no auth — fine for
+# localhost-only dev; set it for anything reachable past that. Env-only, no
+# yaml field, so a token never ends up in a mounted config file.
+
 storage:
   # Local debug: sqlite, just a file url.
   type: sqlite

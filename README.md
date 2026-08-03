@@ -48,6 +48,25 @@ All paths below are under `/api`.
 | `DELETE` | `/api/labels/{cluster}/{database}/{table}/{key}` | Remove a label. |
 | `POST` | `/api/sync` | Re-introspect clusters. Optional `?cluster=<name>`. |
 
+### Auth
+
+Off by default — fine for localhost-only dev. Set `OHMYDB_AUTH_TOKEN` (env
+var only, never in `config.yaml`) to require a bearer token on the three
+mutating routes above (`PUT`/`DELETE /api/labels/...`, `POST /api/sync`).
+Reads (`GET /api/...`) and MCP are never gated by this token, even when
+it's set — separate concern, guard those at the network/proxy layer
+(e.g. Pomerium, above) if they need to be private too.
+
+```bash
+export OHMYDB_AUTH_TOKEN=s3cr3t
+uv run ohmydb serve
+
+curl -X POST http://127.0.0.1:8080/api/sync \
+  -H "Authorization: Bearer $OHMYDB_AUTH_TOKEN"
+```
+
+A missing or wrong token gets `401`.
+
 ## Frontend
 
 `GET /` serves a small static page (`app/web/index.html`, no build step)

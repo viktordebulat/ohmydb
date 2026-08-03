@@ -7,7 +7,7 @@ from app.store.db import make_session_factory
 from app.store.repo import sync_cluster
 
 
-def _client(tmp_path):
+def _client(tmp_path, auth_token=None):
     url = f"sqlite:///{tmp_path}/test.sqlite"
     factory = make_session_factory(url)
     with factory() as s:
@@ -17,7 +17,7 @@ def _client(tmp_path):
                    columns=[Column("ts", "DateTime", "event time")]),
             Entity(cluster="c1", database="analytics", name="mv", kind=EntityKind.MAT_VIEW),
         ], [Edge(("c1", "analytics", "mv"), ("c1", "app", "events"), EdgeKind.READS_FROM)])
-    cfg = AppConfig(storage_url=url, clusters=[ClusterConfig(name="c1", host="localhost")])
+    cfg = AppConfig(storage_url=url, clusters=[ClusterConfig(name="c1", host="localhost")], auth_token=auth_token)
     return TestClient(create_app(cfg))
 
 
@@ -115,3 +115,32 @@ def test_sync_endpoint(tmp_path, monkeypatch):
         raise ConnectionError("cluster down")
     monkeypatch.setattr(api_mod, "run_sync", boom)
     assert client.post("/api/sync").status_code == 502
+
+
+def test_auth_token_guards_mutating_routes_only(tmp_path, monkeypatch):
+    import app.api as api_mod
+
+    monkeypatch.setattr(api_mod, "run_sync", lambda cfg, only_cluster=None: {"c1": {"created": 0}})
+    client = _client(tmp_path, auth_token="s3cr3t")
+
+    # reads stay open — no token required even when one is configured
+    assert client.get("/api/clusters").status_code == 200
+    assert client.get("/api/graph/c1").status_code == 200
+
+    # mutations reject missing/wrong tokens
+    for headers in [{}, {"Authorization": "Bearer wrong"}, {"Authorization": "s3cr3t"}]:
+        assert client.post("/api/sync", headers=headers).status_code == 401
+        assert client.put("/api/labels/c1/app/events", json={"key": "k", "value": "v"}, headers=headers).status_code == 401
+        assert client.delete("/api/labels/c1/app/events/k", headers=headers).status_code == 401
+
+    # the right token gets through
+    auth = {"Authorization": "Bearer s3cr3t"}
+    assert client.post("/api/sync", headers=auth).status_code == 200
+    assert client.put("/api/labels/c1/app/events", json={"key": "k", "value": "v"}, headers=auth).status_code == 200
+    assert client.delete("/api/labels/c1/app/events/k", headers=auth).status_code == 200
+
+
+def test_auth_off_by_default(tmp_path):
+    """No OHMYDB_AUTH_TOKEN / auth_token configured => mutating routes stay open."""
+    client = _client(tmp_path)  # auth_token=None
+    assert client.put("/api/labels/c1/app/events", json={"key": "k", "value": "v"}).status_code == 200
