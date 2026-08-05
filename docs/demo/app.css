@@ -82,6 +82,10 @@ button:hover { border-color: var(--muted); }
 table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grid); }
 th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+th[data-sort] { cursor: pointer; user-select: none; }
+th[data-sort]:hover { color: var(--ink); }
+th[data-sort].sort-asc::after { content: "▲"; margin-left: 4px; font-size: 9px; }
+th[data-sort].sort-desc::after { content: "▼"; margin-left: 4px; font-size: 9px; }
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--surface); }
 tbody tr.selected { background: var(--border); }
@@ -120,7 +124,47 @@ tbody tr.selected { background: var(--border); }
    so #mindmap just flex:1-fills #mindmap-area instead. Explicit
    background on the wrapper too, so there's no gap-flash regardless. */
 #mindmap-area { position: relative; display: flex; flex: 1; min-height: 0; background: var(--surface); }
-#mindmap { flex: 1; min-height: 0; width: 100%; }
+/* overflow:hidden (not just min-height:0) — without it, #mindmap's intrinsic
+   content width (the mind-elixir canvas) keeps it from shrinking below that
+   size in the flex row, so #schema-pane gets pushed off past the viewport
+   edge instead of sharing the row. */
+#mindmap { flex: 1; min-height: 0; width: 100%; overflow: hidden; }
+
+/* Vendor's me-tpc defaults to max-width:35em + white-space:pre-wrap, which
+   only breaks on whitespace — a long unbroken identifier (snake_case table
+   name, no spaces) still overflows past the node's border. Narrow the cap
+   and allow mid-word breaks so long names wrap inside the node instead. */
+#mindmap me-tpc { max-width: 340px; overflow-wrap: anywhere; word-break: break-word; }
+
+#schema-handle {
+  display: none; flex-shrink: 0; width: 6px; cursor: col-resize; background: var(--grid);
+}
+#schema-handle:hover, #schema-handle.dragging { background: var(--muted); }
+#mindmap-area.schema-open #schema-handle { display: block; }
+
+#schema-pane {
+  display: none; flex-direction: column; flex: 0 0 320px; min-width: 180px;
+  border-left: 1px solid var(--grid); background: var(--surface); overflow: hidden;
+}
+#mindmap-area.schema-open #schema-pane { display: flex; }
+#schema-title-bar {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  padding: 8px 12px; font-size: 12.5px; color: var(--ink-2); border-bottom: 1px solid var(--grid);
+}
+#schema-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#schema-copy { flex-shrink: 0; padding: 2px 8px; font-size: 11px; }
+#schema-copy:disabled { opacity: 0.4; cursor: default; }
+#schema-close {
+  flex-shrink: 0; border: 0; background: none; padding: 0 4px; font-size: 16px; line-height: 1;
+  color: var(--muted);
+}
+#schema-close:hover { color: var(--ink); border-color: transparent; }
+#schema-body { flex: 1; overflow-y: auto; overflow-x: auto; padding: 10px 12px; }
+#schema-body .sub { color: var(--muted); font-size: 12px; }
+#schema-body table { margin-bottom: 12px; }
+#schema-body .meta-table th {
+  width: 100px; text-transform: none; letter-spacing: 0; vertical-align: top; white-space: nowrap;
+}
 
 /* small translucent block, floated over the top-left of the graph */
 #legend {

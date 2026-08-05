@@ -71,7 +71,14 @@
     <div id="status"></div>
     <table>
       <thead>
-        <tr><th>name</th><th>database</th><th>kind</th><th>engine</th><th>refreshable</th><th>labels</th></tr>
+        <tr>
+          <th data-sort="name">name</th>
+          <th data-sort="database">database</th>
+          <th data-sort="kind">kind</th>
+          <th data-sort="engine">engine</th>
+          <th data-sort="refreshable">refreshable</th>
+          <th>labels</th>
+        </tr>
       </thead>
       <tbody id="rows"></tbody>
     </table>
@@ -85,6 +92,15 @@
     <div id="mindmap-area">
       <div id="legend"></div>
       <div id="mindmap"></div>
+      <div id="schema-handle"></div>
+      <div id="schema-pane">
+        <div id="schema-title-bar">
+          <div id="schema-title"></div>
+          <button id="schema-copy" type="button" title="copy schema DDL" disabled>copy DDL</button>
+          <button id="schema-close" type="button" title="close">×</button>
+        </div>
+        <div id="schema-body"></div>
+      </div>
     </div>
   </div>
 </main>

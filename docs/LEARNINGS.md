@@ -177,6 +177,35 @@ Gotchas discovered during implementation. Append after each task, then compact
   then read the actual bound port from
   `server.servers[0].sockets[0].getsockname()`. Teardown is
   `server.should_exit = True` + `thread.join()`.
+- A flex:1 sibling of a fixed-width panel (e.g. `#mindmap` next to a
+  drag-resizable `#schema-pane`) won't shrink below its content's intrinsic
+  width unless it has its own `overflow` set to something other than
+  `visible` — CSS's automatic-minimum-size rule only zeroes out at the flex
+  item itself, not from a descendant's `overflow:hidden` (mind-elixir's own
+  inner `.map-container` already clips, but that doesn't help `#mindmap`,
+  the actual flex item, size correctly). Symptom: the fixed sibling gets
+  pushed off past the viewport edge instead of sharing the row — caught by
+  comparing children's `getBoundingClientRect()` widths against the
+  container's, not by eyeballing a screenshot (a cropped screenshot can look
+  fine while surrounding content is silently unreachable off-screen).
+- mind-elixir prefixes DOM node ids with `me` (`el.dataset.nodeid = "me" +
+  nodeObj.id`) — querying `[data-nodeid="${entityId}"]` from outside the
+  library (e.g. driving it from a test) needs the same prefix or the
+  selector silently matches nothing.
+- Two async handlers both toggling the same CSS class from one event (e.g. a
+  node-click bus listener firing both a "show detail panel" and a
+  "re-center the tree" async fetch) can race: the second handler's
+  synchronous prelude can undo the first handler's state change before its
+  own fetch resolves, leaving stale-looking content visible in a
+  now-closed/wrong-state panel. Fix by moving the reset to the specific
+  entry point that actually needs it (e.g. a fresh row click) rather than
+  every code path that happens to touch the shared state.
+- Before improvising a browser-driving script for this frontend, check
+  `tests/test_web_ui.py` first — it's a real pytest+Playwright harness
+  (`uv run playwright install chromium`, auto-skips otherwise) with a
+  `live_server` fixture already wired to a seeded sqlite catalog. An ad hoc
+  `npm install playwright` + hand-rolled script in a scratch dir duplicates
+  it instead of extending it.
 - mind-elixir's constructor sets `style.position = "relative"` inline on
   whatever element you pass as `el`, unconditionally. An inline style beats
   any stylesheet rule regardless of specificity, so `#mindmap { position:
