@@ -11,7 +11,14 @@ const splitHandleEl = document.getElementById('split-handle');
 const relationsTitleEl = document.getElementById('relations-title');
 const relationsCloseBtn = document.getElementById('relations-close');
 const mindmapEl = document.getElementById('mindmap');
+const mindmapAreaEl = document.getElementById('mindmap-area');
 const legendEl = document.getElementById('legend');
+const schemaTitleEl = document.getElementById('schema-title');
+const schemaBodyEl = document.getElementById('schema-body');
+const schemaCopyBtn = document.getElementById('schema-copy');
+const schemaCloseBtn = document.getElementById('schema-close');
+const schemaHandleEl = document.getElementById('schema-handle');
+const schemaPaneEl = document.getElementById('schema-pane');
 const themeSwitchEl = document.getElementById('theme-switch');
 
 const fDatabase = document.getElementById('f-database');
@@ -24,6 +31,8 @@ const labelAddBtn = document.getElementById('label-add');
 
 let nodes = [];
 let labelFilters = []; // [{key: input, value: input}]
+let sortKey = null;
+let sortDir = 1; // 1 = asc, -1 = desc
 
 async function loadClusters() {
   const clusters = await (await fetch('api/clusters')).json();
@@ -87,10 +96,24 @@ function matches(node) {
   return true;
 }
 
+function sortValue(n, key) {
+  if (key === 'refreshable') return n.refreshable ? 1 : 0;
+  return (n[key] || '').toString().toLowerCase();
+}
+
 function render() {
   // Always renders the full filtered set (no pagination/limit) — browse-pane
   // scrolls independently so nothing found is ever hidden.
   const filtered = nodes.filter(matches);
+  if (sortKey) {
+    filtered.sort((a, b) => {
+      const av = sortValue(a, sortKey);
+      const bv = sortValue(b, sortKey);
+      if (av < bv) return -1 * sortDir;
+      if (av > bv) return 1 * sortDir;
+      return 0;
+    });
+  }
   statusEl.textContent = `${filtered.length} / ${nodes.length} entities`;
   // Entity identity and label key/value are all attacker-reachable (label
   // values via PUT /api/labels, names/databases via whatever synced from the
@@ -105,6 +128,9 @@ function render() {
       <td>${Object.entries(n.labels).map(([k, v]) => `<span class="chip">${escapeHtml(k)}:${escapeHtml(v)}</span>`).join('')}</td>
     </tr>`).join('');
 }
+
+const entityApiUrl = (cluster, database, name) =>
+  `api/entities/${encodeURIComponent(cluster)}/${encodeURIComponent(database)}/${encodeURIComponent(name)}`;
 
 const ENTITY_PREFIX = 'e:';
 const entityId = (cluster, database, name) => `${ENTITY_PREFIX}${cluster}::${database}::${name}`;
@@ -224,10 +250,10 @@ function renderTree(cluster, database, name, rel) {
     mind.init(data);
     mind.bus.addListener('selectNodes', (selected) => {
       const id = selected?.[0]?.id;
-      if (id && id.startsWith(ENTITY_PREFIX) && id !== mind.nodeData.id) {
-        const { cluster, database, name } = parseEntityId(id);
-        showRelations(cluster, database, name);
-      }
+      if (!id || !id.startsWith(ENTITY_PREFIX)) return;
+      const { cluster, database, name } = parseEntityId(id);
+      showSchema(cluster, database, name);
+      if (id !== mind.nodeData.id) showRelations(cluster, database, name);
     });
   } else {
     mind.refresh(data);
@@ -242,22 +268,58 @@ function renderTree(cluster, database, name, rel) {
 async function showRelations(cluster, database, name) {
   splitEl.classList.add('relations-open');
   relationsTitleEl.textContent = `loading relations for ${cluster}/${database}/${name}…`;
-  const res = await fetch(
-    `api/entities/${encodeURIComponent(cluster)}/${encodeURIComponent(database)}/${encodeURIComponent(name)}/relations?direct=true`
-  );
+  const entityUrl = entityApiUrl(cluster, database, name);
+  const res = await fetch(`${entityUrl}/relations?direct=true`);
   if (!res.ok) {
     relationsTitleEl.textContent = `no relations found for ${cluster}/${database}/${name}`;
     return;
   }
   const rel = await res.json();
-  relationsTitleEl.textContent =
-    `${cluster}/${database}/${name} — direct relations (click a node to re-center)`;
+  relationsTitleEl.innerHTML =
+    `${escapeHtml(cluster)}/${escapeHtml(database)}/${escapeHtml(name)} — ` +
+    `<a href="${entityUrl}" target="_blank" rel="noopener">API table</a> · ` +
+    `<a href="${entityUrl}/relations?direct=true" target="_blank" rel="noopener">relations</a> ` +
+    `(click a node to re-center)`;
   renderTree(cluster, database, name, rel);
+}
+
+let lastSchemaDdl = '';
+
+async function showSchema(cluster, database, name) {
+  mindmapAreaEl.classList.add('schema-open');
+  schemaTitleEl.textContent = `${cluster}/${database}/${name}`;
+  schemaBodyEl.innerHTML = '<div class="sub">loading…</div>';
+  lastSchemaDdl = '';
+  schemaCopyBtn.disabled = true;
+  const res = await fetch(entityApiUrl(cluster, database, name));
+  if (!res.ok) {
+    schemaBodyEl.innerHTML = '<div class="sub">not found</div>';
+    return;
+  }
+  const e = await res.json();
+  lastSchemaDdl = e.ddl || '';
+  schemaCopyBtn.disabled = !lastSchemaDdl;
+  const meta = [
+    ['kind', e.kind],
+    ['engine', e.engine_full || e.engine || ''],
+    ['primary key', e.primary_key || ''],
+    ['sorting key', e.sorting_key || ''],
+  ].filter(([, v]) => v);
+  const metaRows = meta.map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join('');
+  const colRows = (e.columns || []).map(c => `
+    <tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.type)}</td><td>${escapeHtml(c.comment || '')}</td></tr>`).join('');
+  schemaBodyEl.innerHTML = `
+    <table class="meta-table"><tbody>${metaRows}</tbody></table>
+    <table><thead><tr><th>column</th><th>type</th><th>comment</th></tr></thead><tbody>${colRows}</tbody></table>`;
 }
 
 function closeRelations() {
   splitEl.classList.remove('relations-open');
   browsePaneEl.style.flex = ''; // next open starts from an even split again
+  mindmapAreaEl.classList.remove('schema-open');
+  schemaPaneEl.style.flex = '';
+  lastSchemaDdl = '';
+  schemaCopyBtn.disabled = true;
   rowsEl.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
 }
 
@@ -281,12 +343,55 @@ splitHandleEl.addEventListener('pointermove', (e) => {
   splitHandleEl.classList.remove('dragging');
 }));
 
+let schemaDragging = false;
+schemaHandleEl.addEventListener('pointerdown', (e) => {
+  schemaDragging = true;
+  schemaHandleEl.setPointerCapture(e.pointerId);
+  schemaHandleEl.classList.add('dragging');
+});
+schemaHandleEl.addEventListener('pointermove', (e) => {
+  if (!schemaDragging) return;
+  const containerRect = mindmapAreaEl.getBoundingClientRect();
+  const handleWidth = schemaHandleEl.getBoundingClientRect().width;
+  const min = 180;
+  const max = containerRect.width - min - handleWidth;
+  const width = Math.max(min, Math.min(max, containerRect.right - e.clientX));
+  schemaPaneEl.style.flex = `0 0 ${width}px`;
+});
+['pointerup', 'pointercancel'].forEach(evt => schemaHandleEl.addEventListener(evt, () => {
+  schemaDragging = false;
+  schemaHandleEl.classList.remove('dragging');
+}));
+schemaCloseBtn.addEventListener('click', () => {
+  mindmapAreaEl.classList.remove('schema-open');
+  schemaPaneEl.style.flex = '';
+});
+schemaCopyBtn.addEventListener('click', async () => {
+  if (!lastSchemaDdl) return;
+  await navigator.clipboard.writeText(lastSchemaDdl);
+  const original = schemaCopyBtn.textContent;
+  schemaCopyBtn.textContent = 'copied';
+  setTimeout(() => { schemaCopyBtn.textContent = original; }, 1200);
+});
+
+document.querySelectorAll('th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.sort;
+    sortDir = sortKey === key ? -sortDir : 1;
+    sortKey = key;
+    document.querySelectorAll('th[data-sort]').forEach(t => t.classList.remove('sort-asc', 'sort-desc'));
+    th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
+    render();
+  });
+});
+
 rowsEl.addEventListener('click', (e) => {
   const tr = e.target.closest('tr');
   if (!tr) return;
   rowsEl.querySelectorAll('tr.selected').forEach(r => r.classList.remove('selected'));
   tr.classList.add('selected');
   const { cluster, database, name } = tr.dataset;
+  mindmapAreaEl.classList.remove('schema-open'); // new browse target — stale schema pane no longer applies
   showRelations(cluster, database, name);
 });
 
