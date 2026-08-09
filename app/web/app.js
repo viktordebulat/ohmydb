@@ -28,6 +28,7 @@ const fEngine = document.getElementById('f-engine');
 const fRefreshable = document.getElementById('f-refreshable');
 const labelRowsEl = document.getElementById('label-rows');
 const labelAddBtn = document.getElementById('label-add');
+const filtersClearBtn = document.getElementById('filters-clear');
 
 let nodes = [];
 let labelFilters = []; // [{keySelect, valueInput, datalist}]
@@ -442,6 +443,16 @@ reloadBtn.addEventListener('click', () => loadGraph(clusterSel.value));
 [fDatabase, fName, fKind, fEngine, fRefreshable].forEach(el =>
   el.addEventListener('input', render));
 labelAddBtn.addEventListener('click', addLabelRow);
+filtersClearBtn.addEventListener('click', () => {
+  fDatabase.value = '';
+  fName.value = '';
+  fKind.value = '';
+  fEngine.value = '';
+  fRefreshable.value = '';
+  labelRowsEl.innerHTML = '';
+  labelFilters = [];
+  render();
+});
 
 // Key must match the inline anti-FOUC script in index.html's <head>.
 const THEME_KEY = 'oh-my-db-theme';
