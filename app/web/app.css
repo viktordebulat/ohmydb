@@ -72,7 +72,8 @@ button:hover { border-color: var(--muted); }
 .field label { font-size: 11px; color: var(--muted); }
 #label-rows { display: flex; flex-direction: column; gap: 6px; }
 .label-row { display: flex; gap: 6px; align-items: center; }
-.label-row input { width: 110px; }
+.label-row select { width: 110px; }
+.label-row input { width: 160px; }
 .label-row button { padding: 3px 8px; }
 #label-add { padding: 3px 8px; }
 

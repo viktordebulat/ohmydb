@@ -37,23 +37,23 @@
 <div id="filters">
   <div class="field">
     <label for="f-database">database</label>
-    <select id="f-database"><option value="">all</option></select>
+    <select id="f-database" title="Filter by database."><option value="">all</option></select>
   </div>
   <div class="field">
     <label for="f-name">name contains</label>
-    <input type="text" id="f-name" placeholder="substring">
+    <input type="text" id="f-name" placeholder="substring" title="Case-insensitive substring match against the entity name.">
   </div>
   <div class="field">
     <label for="f-kind">kind</label>
-    <select id="f-kind"><option value="">all</option></select>
+    <select id="f-kind" title="Filter by entity kind. Options narrow to what's reachable given your other active filters."><option value="">all</option></select>
   </div>
   <div class="field">
     <label for="f-engine">engine</label>
-    <select id="f-engine"><option value="">all</option></select>
+    <select id="f-engine" title="Filter by storage engine. Options narrow to what's reachable given your other active filters."><option value="">all</option></select>
   </div>
   <div class="field">
     <label for="f-refreshable">refreshable</label>
-    <select id="f-refreshable">
+    <select id="f-refreshable" title="Filter materialized views by whether they're set to auto-refresh.">
       <option value="">any</option>
       <option value="true">yes</option>
       <option value="false">no</option>
@@ -62,7 +62,7 @@
   <div class="field">
     <label>labels</label>
     <div id="label-rows"></div>
-    <button id="label-add" type="button">+ label filter</button>
+    <button id="label-add" type="button" title="Add another label filter — multiple rows are ANDed together.">+ label filter</button>
   </div>
 </div>
 
@@ -72,11 +72,11 @@
     <table>
       <thead>
         <tr>
-          <th data-sort="name">name</th>
-          <th data-sort="database">database</th>
-          <th data-sort="kind">kind</th>
-          <th data-sort="engine">engine</th>
-          <th data-sort="refreshable">refreshable</th>
+          <th data-sort="name" title="Click to sort, click again to reverse.">name</th>
+          <th data-sort="database" title="Click to sort, click again to reverse.">database</th>
+          <th data-sort="kind" title="Click to sort, click again to reverse.">kind</th>
+          <th data-sort="engine" title="Click to sort, click again to reverse.">engine</th>
+          <th data-sort="refreshable" title="Click to sort, click again to reverse.">refreshable</th>
           <th>labels</th>
         </tr>
       </thead>
