@@ -228,6 +228,12 @@ Gotchas discovered during implementation. Append after each task, then compact
   `?direct=true` etc. need no special-casing. `TestClient(create_app(cfg))`
   in-process against an already-synced catalog is enough to walk every route;
   no need to actually bind a port via `ohmydb serve`.
+- `task demo:check` (`scripts/check-demo.sh`) only compares the latest git
+  commit touching `app/web/` vs. `docs/demo/` — it doesn't diff content. An
+  `app/web/` change staged/committed without a following `task demo:build`
+  commit still fails it (good), but content correctness within that check is
+  on you; run `task demo:build` and eyeball the diff whenever `app/web/`
+  changes, don't rely on the check alone.
 - `pre-commit run --all-files` (what `pre-commit/action` runs in CI) checks
   every tracked file, not just ones touched by the current change — adding
   the hook repo-wide surfaced pre-existing whitespace violations in vendored

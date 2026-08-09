@@ -32,7 +32,50 @@
     <button type="button" data-theme-choice="light">light</button>
     <button type="button" data-theme-choice="dark">dark</button>
   </div>
+  <button id="info-btn" type="button" title="API &amp; MCP reference">ⓘ</button>
 </header>
+
+<!-- Static reference, hand-synced with app/api.py routes and app/mcp.py
+     @mcp.tool defs — no build step generates this. Editing an endpoint or
+     tool? Update the matching row here too (see ARCHITECTURE.md). -->
+<div id="info-overlay">
+  <div id="info-modal" role="dialog" aria-label="API and MCP reference">
+    <div id="info-title-bar">
+      <div id="info-title">API &amp; MCP reference</div>
+      <button id="info-close" type="button" title="close">×</button>
+    </div>
+    <div id="info-body">
+      <section>
+        <h2>HTTP API</h2>
+        <p class="sub">Base path <code>/api</code>. Mutating routes (marked 🔒) require <code>Authorization: Bearer &lt;token&gt;</code> when <code>OHMYDB_AUTH_TOKEN</code> is configured; unset by default.</p>
+        <table class="ref-table">
+          <tbody>
+            <tr><td><code>GET /api/clusters</code></td><td>Configured cluster names.</td></tr>
+            <tr><td><code>GET /api/graph/{cluster}?q=</code></td><td>Catalog nodes for one cluster (tables, views, materialized views, dictionaries, with labels). No edges. Optional <code>q</code>: substring match against name/database/labels, or <code>key:value</code> for an exact label lookup.</td></tr>
+            <tr><td><code>GET /api/entities/{cluster}/{database}/{name}</code></td><td>Full entity detail: columns with types/comments, raw DDL, engine, attrs, labels.</td></tr>
+            <tr><td><code>GET /api/entities/{cluster}/{database}/{name}/relations?direct=</code></td><td>Transitive upstream (data sources) and downstream (consumers). <code>direct=true</code> limits to immediate 1-hop neighbors.</td></tr>
+            <tr><td><code>PUT /api/labels/{cluster}/{database}/{table}</code> 🔒</td><td>Set a label. Body <code>{"key": ..., "value": ...}</code>.</td></tr>
+            <tr><td><code>DELETE /api/labels/{cluster}/{database}/{table}/{key}</code> 🔒</td><td>Remove a label.</td></tr>
+            <tr><td><code>POST /api/sync?cluster=</code> 🔒</td><td>Re-introspect and re-sync the catalog — all clusters, or one if <code>cluster</code> is given.</td></tr>
+          </tbody>
+        </table>
+      </section>
+      <section>
+        <h2>MCP tools</h2>
+        <p class="sub">Mounted at <code>/mcp</code> over HTTP, or over stdio via <code>ohmydb mcp</code>. Same reads as the HTTP API.</p>
+        <table class="ref-table">
+          <tbody>
+            <tr><td><code>list_clusters()</code></td><td>Configured cluster names. Call this first — <code>get_schema_graph</code> requires one of these.</td></tr>
+            <tr><td><code>get_schema_graph(cluster)</code></td><td>Catalog nodes for one cluster, with labels. No dependency edges — call <code>get_table_relations</code> for one entity's upstream/downstream.</td></tr>
+            <tr><td><code>get_table(cluster, database, name)</code></td><td>Full detail for one entity: columns with types/comments, raw DDL, engine, attrs, labels.</td></tr>
+            <tr><td><code>get_table_relations(cluster, database, name, direct=False)</code></td><td>Transitive upstream/downstream entities. <code>direct=True</code> for only immediate 1-hop neighbors.</td></tr>
+            <tr><td><code>find_tables(query)</code></td><td>Search entities across all clusters. <code>key:value</code> does an exact label lookup; otherwise substring match against name, database, or any label key/value.</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+  </div>
+</div>
 
 <div id="filters">
   <div class="field">

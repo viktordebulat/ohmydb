@@ -50,8 +50,8 @@ else must stay database-agnostic (see AGENTS.md rule).
 |---|---|
 | Support a new database engine | new file in `app/adapters/`, implement `Introspector` |
 | Change what's stored per entity/edge | `app/core/models.py` + `app/store/db.py` (+ adapter that populates it) + `task db:revision -- "message"` to generate the Alembic migration |
-| Add an API endpoint | `app/api.py`, reuse/extend `app/store/queries.py` |
-| Add an MCP tool | `app/mcp.py`, reuse `app/store/queries.py` |
+| Add an API endpoint | `app/api.py`, reuse/extend `app/store/queries.py`; update the reference modal in `app/web/index.html` |
+| Add an MCP tool | `app/mcp.py`, reuse `app/store/queries.py`; update the reference modal in `app/web/index.html` |
 | Add an optional filter to a GET endpoint/tool | optional kwarg (default `None`/`False`) on the `app/store/queries.py` function, passthrough query param in `app/api.py` and/or arg in `app/mcp.py` — keep filter logic in queries.py only, so it stays DB-agnostic and shared |
 | Change sync/upsert behavior | `app/store/repo.py` |
 | Add/change config fields | `app/config.py` |
