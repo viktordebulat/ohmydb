@@ -28,9 +28,10 @@ const fEngine = document.getElementById('f-engine');
 const fRefreshable = document.getElementById('f-refreshable');
 const labelRowsEl = document.getElementById('label-rows');
 const labelAddBtn = document.getElementById('label-add');
+const filtersClearBtn = document.getElementById('filters-clear');
 
 let nodes = [];
-let labelFilters = []; // [{key: input, value: input}]
+let labelFilters = []; // [{keySelect, valueInput, datalist}]
 let sortKey = null;
 let sortDir = 1; // 1 = asc, -1 = desc
 
@@ -46,52 +47,92 @@ async function loadGraph(cluster) {
   nodes = payload.nodes;
   syncedAtEl.textContent = payload.synced_at ? `synced ${payload.synced_at}` : 'never synced';
   populateDistinct(fDatabase, nodes.map(n => n.database));
-  populateDistinct(fKind, nodes.map(n => n.kind));
-  populateDistinct(fEngine, nodes.map(n => n.engine).filter(Boolean));
-  render();
+  refreshLabelKeyOptions();
+  labelFilters.forEach(updateLabelValueOptions);
+  render(); // also (re)populates fKind/fEngine, cross-filtered by the other fields
 }
 
-function populateDistinct(select, values) {
+// placeholder is itself trusted (call-site literal), only `values` needs escaping.
+function populateDistinct(select, values, placeholder = 'all') {
   const current = select.value;
   const distinct = [...new Set(values)].sort();
-  select.innerHTML = '<option value="">all</option>' +
-    distinct.map(v => `<option value="${v}">${v}</option>`).join('');
+  select.innerHTML = `<option value="">${placeholder}</option>` +
+    distinct.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
   if (distinct.includes(current)) select.value = current;
 }
+
+// kind/engine options narrow to what's actually reachable given every OTHER
+// active filter (including each other and the label rows) — `exclude` skips
+// that one field's own check in matches() so its dropdown still offers its
+// own current selection as a choice, not just what it already lets through.
+function updateFacetOptions() {
+  populateDistinct(fKind, nodes.filter(n => matches(n, 'kind')).map(n => n.kind));
+  populateDistinct(fEngine, nodes.filter(n => matches(n, 'engine')).map(n => n.engine).filter(Boolean));
+}
+
+let labelRowSeq = 0;
 
 function addLabelRow() {
   const row = document.createElement('div');
   row.className = 'label-row';
+  const datalistId = `label-values-${labelRowSeq++}`;
   row.innerHTML = `
-    <input type="text" placeholder="key">
-    <input type="text" placeholder="value">
-    <button type="button">×</button>`;
-  const [keyInput, valueInput] = row.querySelectorAll('input');
+    <select title="Label key to filter by (options come from labels seen on this cluster).">
+      <option value="">key</option>
+    </select>
+    <input type="text" list="${datalistId}" placeholder="value1|value2"
+      title="Optional. Matches if the label's value equals any of these, separated by | (exact, case-insensitive) — e.g. vector|data-pipelines. Leave empty to match any value for this key. Pick a suggestion or type your own.">
+    <datalist id="${datalistId}"></datalist>
+    <button type="button" title="remove this label filter">×</button>`;
+  const keySelect = row.querySelector('select');
+  const valueInput = row.querySelector('input');
+  const datalist = row.querySelector('datalist');
+  const entry = { keySelect, valueInput, datalist };
+  keySelect.addEventListener('change', () => {
+    updateLabelValueOptions(entry);
+    render();
+  });
+  valueInput.addEventListener('input', render);
   row.querySelector('button').addEventListener('click', () => {
     row.remove();
     labelFilters = labelFilters.filter(r => r !== entry);
     render();
   });
-  keyInput.addEventListener('input', render);
-  valueInput.addEventListener('input', render);
-  const entry = { key: keyInput, value: valueInput };
   labelFilters.push(entry);
   labelRowsEl.appendChild(row);
+  refreshLabelKeyOptions();
+  updateLabelValueOptions(entry);
+}
+
+function refreshLabelKeyOptions() {
+  const keys = [...new Set(nodes.flatMap(n => Object.keys(n.labels || {})))].sort();
+  for (const entry of labelFilters) populateDistinct(entry.keySelect, keys, 'key');
+}
+
+function updateLabelValueOptions(entry) {
+  const k = entry.keySelect.value;
+  const values = k ? [...new Set(nodes.map(n => n.labels[k]).filter(v => v !== undefined))].sort() : [];
+  entry.datalist.innerHTML = values.map(v => `<option value="${escapeHtml(v)}"></option>`).join('');
 }
 
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
 
-function matches(node) {
+// `exclude` lets a facet's own dropdown compute its options against every
+// OTHER filter without also filtering on itself (see updateFacetOptions).
+function matches(node, exclude) {
   if (fDatabase.value && node.database !== fDatabase.value) return false;
   if (fName.value && !node.name.toLowerCase().includes(fName.value.toLowerCase())) return false;
-  if (fKind.value && node.kind !== fKind.value) return false;
-  if (fEngine.value && node.engine !== fEngine.value) return false;
+  if (exclude !== 'kind' && fKind.value && node.kind !== fKind.value) return false;
+  if (exclude !== 'engine' && fEngine.value && node.engine !== fEngine.value) return false;
   if (fRefreshable.value && String(node.refreshable) !== fRefreshable.value) return false;
-  for (const { key, value } of labelFilters) {
-    const k = key.value.trim();
+  for (const { keySelect, valueInput } of labelFilters) {
+    const k = keySelect.value;
     if (!k) continue;
-    if (node.labels[k] !== value.value) return false;
+    const labelValue = node.labels[k];
+    if (labelValue === undefined) return false; // key chosen, entity doesn't have it
+    const wanted = valueInput.value.trim().split('|').map(s => s.trim().toLowerCase()).filter(Boolean);
+    if (wanted.length && !wanted.includes(labelValue.toLowerCase())) return false;
   }
   return true;
 }
@@ -102,9 +143,10 @@ function sortValue(n, key) {
 }
 
 function render() {
+  updateFacetOptions();
   // Always renders the full filtered set (no pagination/limit) — browse-pane
   // scrolls independently so nothing found is ever hidden.
-  const filtered = nodes.filter(matches);
+  const filtered = nodes.filter(n => matches(n));
   if (sortKey) {
     filtered.sort((a, b) => {
       const av = sortValue(a, sortKey);
@@ -401,6 +443,16 @@ reloadBtn.addEventListener('click', () => loadGraph(clusterSel.value));
 [fDatabase, fName, fKind, fEngine, fRefreshable].forEach(el =>
   el.addEventListener('input', render));
 labelAddBtn.addEventListener('click', addLabelRow);
+filtersClearBtn.addEventListener('click', () => {
+  fDatabase.value = '';
+  fName.value = '';
+  fKind.value = '';
+  fEngine.value = '';
+  fRefreshable.value = '';
+  labelRowsEl.innerHTML = '';
+  labelFilters = [];
+  render();
+});
 
 // Key must match the inline anti-FOUC script in index.html's <head>.
 const THEME_KEY = 'oh-my-db-theme';

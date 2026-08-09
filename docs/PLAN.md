@@ -301,6 +301,36 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
     succeeding on all three routes; `test_load_config_auth_token_from_env_only`
     covers unset/set/empty-string env var.
 
+- **M20 (2026-08-05)**: relations-tree detail. Relations title bar
+  (`#relations-title`) now links to the raw `GET /api/entities/...` and
+  `.../relations` JSON alongside the breadcrumb path. Clicking any node in
+  the mind-elixir tree — not just row clicks in the browse pane — opens a
+  draggable right-side panel (`#schema-pane`, sibling of `#mindmap` inside
+  `#mindmap-area`) showing that entity's schema only (kind, engine, keys,
+  columns from `GET /api/entities/...`) with a copy-DDL button; deliberately
+  excludes relations, which stay in the tree it's next to. `#mindmap` needed
+  an explicit `overflow: hidden` for the new flex sibling to size correctly
+  — see LEARNINGS.md's flex min-width:auto entry. Long unbroken node names
+  (`#mindmap me-tpc`) got `overflow-wrap: anywhere` so they wrap inside the
+  node instead of spilling past its border. Browse-pane column headers
+  (name/database/kind/engine/refreshable) are now click-to-sort, ascending
+  then descending, `labels` excluded (no natural order for a key/value bag).
+- **M21 (2026-08-09)**: filter panel, round two. `kind`/`engine` dropdowns
+  now recompute their own option list on every `render()` against every
+  *other* active filter (`matches(node, exclude)` skips only that field's
+  own check) — picking a database narrows which kinds/engines are even
+  offered, not just what rows show. Label filtering replaced free-text
+  key/value inputs: key is a `<select>` of keys actually present on the
+  current cluster; value is a text input with a `<datalist>` of that key's
+  seen values (pick a suggestion or type one), matched as literal
+  `|`-separated alternatives (exact, case-insensitive) rather than
+  regex — e.g. `vector|data-pipelines` — deliberately not a regex engine,
+  per explicit ask (OR of literal values covers the actual use case with no
+  ReDoS/escaping surface). A key chosen with an empty value means "has this
+  label at all". Added a "clear filters" button (resets all fields, drops
+  every label row) and `title` tooltips across the filter bar and sortable
+  headers.
+
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
 `app/adapters/clickhouse.py`, all short) plus `LEARNINGS.md` for the
