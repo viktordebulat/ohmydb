@@ -20,6 +20,9 @@ const schemaCloseBtn = document.getElementById('schema-close');
 const schemaHandleEl = document.getElementById('schema-handle');
 const schemaPaneEl = document.getElementById('schema-pane');
 const themeSwitchEl = document.getElementById('theme-switch');
+const infoBtn = document.getElementById('info-btn');
+const infoOverlayEl = document.getElementById('info-overlay');
+const infoCloseBtn = document.getElementById('info-close');
 
 const fDatabase = document.getElementById('f-database');
 const fName = document.getElementById('f-name');
@@ -483,6 +486,14 @@ themeSwitchEl.addEventListener('click', (e) => {
 // Only matters in "auto": OS preference can change without a page reload.
 prefersDark.addEventListener('change', () => {
   if (currentTheme === 'auto') applyTheme('auto');
+});
+
+function closeInfo() { infoOverlayEl.classList.remove('open'); }
+infoBtn.addEventListener('click', () => infoOverlayEl.classList.add('open'));
+infoCloseBtn.addEventListener('click', closeInfo);
+infoOverlayEl.addEventListener('click', (e) => { if (e.target === infoOverlayEl) closeInfo(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && infoOverlayEl.classList.contains('open')) closeInfo();
 });
 
 applyTheme(localStorage.getItem(THEME_KEY) || 'auto');
