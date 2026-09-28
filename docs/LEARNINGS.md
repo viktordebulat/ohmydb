@@ -46,6 +46,9 @@ Gotchas discovered during implementation. Append after each task, then compact
   runs in-memory; wrap in `asyncio.run()` — no pytest-asyncio needed.
 - Postgres swap really is conn-string-only: SQLAlchemy JSON columns and all
   sync/label logic ran unmodified on `postgresql+psycopg://`.
+- `create_engine(..., pool_pre_ping=True)`: without it a pooled Postgres
+  connection killed while idle (server/proxy timeout) fails the first request
+  after the idle period with a 500; the next one works (pool invalidated).
 - API + MCP on one host: `mcp.http_app(path="/")` → `app.mount("/mcp", it)`, and
   pass `mcp_app.lifespan` to `FastAPI(lifespan=...)` — without the lifespan the
   streamable-http session manager never starts and every `/mcp` call 500s. Probe
@@ -219,6 +222,13 @@ Gotchas discovered during implementation. Append after each task, then compact
   scripted drag, not by checking background-color alone (the wrapper's own
   background was already correct, which made the first fix attempt look
   right when it wasn't — the *inner* canvas was the thing not resizing).
+- Starlette `StaticFiles` sends `Last-Modified`/`ETag` but no `Cache-Control`,
+  so browsers cache `index.html`/`app.js` heuristically (~10% of file age,
+  i.e. days) and can pair a stale HTML with a newer JS after a deploy — a
+  missing element id throws before `loadClusters()` runs, page empty until
+  reload. `RevalidatedStaticFiles` in `app/api.py` forces `no-cache`. Also:
+  frontend fetches must check `res.ok` — a bare `(await fetch()).json()`
+  on a 500 dies as an unhandled rejection with no visible hint.
 
 ## CI/Pages
 

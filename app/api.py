@@ -22,6 +22,18 @@ from app.store.queries import (
 WEB_DIR = Path(__file__).parent / "web"
 
 
+class RevalidatedStaticFiles(StaticFiles):
+    """StaticFiles sends Last-Modified/ETag but no Cache-Control, so browsers
+    cache heuristically (~10% of the file's age) — a stale index.html paired
+    with a newer app.js (or vice versa) after a deploy breaks the page until a
+    reload. no-cache = always revalidate; unchanged files are a cheap 304."""
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 class LabelBody(BaseModel):
     key: str
     value: str = ""
@@ -102,5 +114,5 @@ def create_app(cfg: AppConfig) -> FastAPI:
 
     # Single mount covers index.html at "/" (html=True), app.css/app.js, and
     # vendor/* (StaticFiles serves nested dirs) — no separate index route needed.
-    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+    app.mount("/", RevalidatedStaticFiles(directory=WEB_DIR, html=True), name="web")
     return app
