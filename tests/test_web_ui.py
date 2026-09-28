@@ -87,6 +87,24 @@ def test_table_renders_seeded_entities(live_server):
         browser.close()
 
 
+
+def test_failed_initial_load_shows_error_and_reload_recovers(live_server):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.route("**/api/clusters", lambda route: route.fulfill(status=500))
+        page.goto(live_server)
+        page.wait_for_selector("#status:has-text('failed to load clusters')")
+        assert page.locator("#rows tr").count() == 0
+
+        page.unroute("**/api/clusters")
+        page.click("#reload")
+        page.wait_for_selector("#rows tr")
+        assert page.locator("#cluster").input_value() == "c1"
+        browser.close()
+
 def test_row_click_renders_relations_tree(live_server):
     from playwright.sync_api import sync_playwright
 

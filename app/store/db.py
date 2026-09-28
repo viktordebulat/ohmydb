@@ -87,6 +87,8 @@ def run_migrations(engine: Engine) -> None:
 
 
 def make_session_factory(url: str) -> sessionmaker[Session]:
-    engine = create_engine(url)
+    # pre_ping: a pooled Postgres connection dropped while idle (server/proxy
+    # timeout) would otherwise fail the first request after the idle period.
+    engine = create_engine(url, pool_pre_ping=True)
     run_migrations(engine)
     return sessionmaker(engine, expire_on_commit=False)

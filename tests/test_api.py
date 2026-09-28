@@ -144,3 +144,9 @@ def test_auth_off_by_default(tmp_path):
     """No OHMYDB_AUTH_TOKEN / auth_token configured => mutating routes stay open."""
     client = _client(tmp_path)  # auth_token=None
     assert client.put("/api/labels/c1/app/events", json={"key": "k", "value": "v"}).status_code == 200
+
+
+def test_static_files_revalidate(tmp_path):
+    client = _client(tmp_path)
+    for path in ("/", "/app.js"):
+        assert client.get(path).headers["cache-control"] == "no-cache"

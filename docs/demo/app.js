@@ -38,15 +38,35 @@ let labelFilters = []; // [{keySelect, valueInput, datalist}]
 let sortKey = null;
 let sortDir = 1; // 1 = asc, -1 = desc
 
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  return res.json();
+}
+
+// A failed initial load used to die as an unhandled rejection, leaving an
+// empty page with no hint — surface it in the status line instead; the
+// reload button retries from whichever step failed.
 async function loadClusters() {
-  const clusters = await (await fetch('api/clusters')).json();
-  clusterSel.innerHTML = clusters.map(c => `<option value="${c}">${c}</option>`).join('');
-  if (clusters.length) await loadGraph(clusters[0]);
+  try {
+    const clusters = await fetchJson('api/clusters');
+    clusterSel.innerHTML = clusters.map(c => `<option value="${c}">${c}</option>`).join('');
+  } catch (e) {
+    statusEl.textContent = `failed to load clusters (${e.message}) — press reload`;
+    return;
+  }
+  if (clusterSel.value) await loadGraph(clusterSel.value);
 }
 
 async function loadGraph(cluster) {
   statusEl.textContent = 'loading…';
-  const payload = await (await fetch(`api/graph/${encodeURIComponent(cluster)}`)).json();
+  let payload;
+  try {
+    payload = await fetchJson(`api/graph/${encodeURIComponent(cluster)}`);
+  } catch (e) {
+    statusEl.textContent = `failed to load catalog (${e.message}) — press reload`;
+    return;
+  }
   nodes = payload.nodes;
   syncedAtEl.textContent = payload.synced_at ? `synced ${payload.synced_at}` : 'never synced';
   populateDistinct(fDatabase, nodes.map(n => n.database));
@@ -442,7 +462,7 @@ rowsEl.addEventListener('click', (e) => {
 
 relationsCloseBtn.addEventListener('click', closeRelations);
 clusterSel.addEventListener('change', () => loadGraph(clusterSel.value));
-reloadBtn.addEventListener('click', () => loadGraph(clusterSel.value));
+reloadBtn.addEventListener('click', () => (clusterSel.value ? loadGraph(clusterSel.value) : loadClusters()));
 [fDatabase, fName, fKind, fEngine, fRefreshable].forEach(el =>
   el.addEventListener('input', render));
 labelAddBtn.addEventListener('click', addLabelRow);
