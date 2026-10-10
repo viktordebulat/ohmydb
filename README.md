@@ -27,10 +27,10 @@ The catalog is exposed as an MCP server at `/mcp/`:
 | Tool | Arguments | Returns |
 |------|-----------|---------|
 | `list_clusters` | — | Configured cluster names. Call first — `get_schema_graph` needs one. |
-| `get_schema_graph` | `cluster` | Catalog nodes for one cluster (tables, views, MVs, dictionaries + labels) and the cluster's last `synced_at`. No edges — see `get_table_relations`. |
-| `get_table` | `cluster`, `database`, `name` | One entity in full: columns with types/comments, raw DDL, engine, attrs, labels. |
+| `get_schema_graph` | `cluster` | Catalog nodes for one cluster (tables, views, MVs, dictionaries + labels) and the cluster's last `synced_at`. No edges — see `get_table_relations`. With [annotations](#annotations) on: `summary`/`status` columns and an `annotations` block (global + per-database query hints). |
+| `get_table` | `cluster`, `database`, `name` | One entity in full: columns with types/comments, raw DDL, engine, attrs, labels. With annotations on: `annotation` (description, grain, status/use_instead, owner, query_hints, relationships, examples) and per-column `description`/`values`. |
 | `get_table_relations` | `cluster`, `database`, `name`, `direct` (optional, default `False`) | The entity plus its upstream sources and downstream consumers — transitive by default, or just 1-hop neighbors when `direct=True` (no separate edge list — membership in upstream/downstream already implies direction). |
-| `find_tables` | `query`, `column`, `column_type`, `match`, `kind`, `cluster` (all optional, ≥1 required, ANDed) | Brief matches (identity + kind + labels). `query`: substring of name, database, or label — or exact `key:value` label lookup when it contains a colon. `column`: list of case-insensitive name globs (`*_id`); `match="all"` (default) needs every pattern to hit, `"any"` one. `column_type`: exact type, bound to the same column as each pattern. Adds `matched_columns` when a column filter is given. |
+| `find_tables` | `query`, `column`, `column_type`, `match`, `kind`, `cluster` (all optional, ≥1 required, ANDed) | Brief matches (identity + kind + labels). `query`: substring of name, database, or label — or exact `key:value` label lookup when it contains a colon. `column`: list of case-insensitive name globs (`*_id`); `match="all"` (default) needs every pattern to hit, `"any"` one. `column_type`: exact type, bound to the same column as each pattern. Adds `matched_columns` when a column filter is given. With annotations on: `query` also matches the summary; `summary`/`status` columns. |
 
 ## HTTP API
 
@@ -76,6 +76,28 @@ name/kind/engine/refreshable/labels, click one to see its direct
 upstream/downstream relations as a mind map (via the vendored
 [mind-elixir](https://github.com/SSShooter/mind-elixir-core)). Click any
 node in the map to re-center on it.
+
+## Annotations
+
+Optional, off by default. Human-curated YAML in a git repo (reviewed in MRs)
+adds what introspection can't know: what a table is, grain, units, enum
+values, join keys, deprecations, query gotchas and verified example queries.
+ohmydb pulls it on every sync and polls it while serving.
+
+```yaml
+annotations:
+  enabled: true
+  repo: https://gitlab.example.com/data/schema-annotations.git   # or a local dir
+  ref: main
+  pull_interval: 300      # serve polling, seconds; 0 = only on sync
+```
+
+Token for private repos: `OHMYDB_ANNOTATIONS_TOKEN` env only (GitLab: project
+access token, Reporter, `read_repository`); the image ships `git`. CLI:
+`ohmydb annotations pull`, `ohmydb annotations validate DIR` (CI for the
+annotation repo), `ohmydb annotations schema` (JSON Schema for editors).
+Format, cluster overrides and security notes:
+[docs/ANNOTATIONS.md](docs/ANNOTATIONS.md).
 
 ## Labels: manual vs. auto
 

@@ -1,0 +1,8 @@
+description: |
+  Registered users, one row per account.
+grain: one row per user account
+owner: team-web
+columns:
+  id: {description: "User id, referenced by app.events.user_id"}
+  email: {description: "Login email, PII"}
+  created_at: {description: "Signup time, UTC"}

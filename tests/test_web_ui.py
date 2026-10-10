@@ -12,11 +12,11 @@ import pytest
 import uvicorn
 
 from app.api import create_app
-from app.config import AppConfig, ClusterConfig
+from app.config import AnnotationsConfig, AppConfig, ClusterConfig
 from app.core.models import Edge, EdgeKind, Entity, EntityKind
 from app.store.db import make_session_factory
 from app.store.queries import set_label
-from app.store.repo import sync_cluster
+from app.store.repo import replace_annotations, sync_cluster
 
 
 def _browser_available() -> bool:
@@ -39,6 +39,7 @@ pytestmark = pytest.mark.skipif(
 # so the fixture shouldn't look tied to one either.
 LABEL_KEY = "zzz-test-key"
 LABEL_VALUE = "zzz-test-value"
+ANNOTATION_DESC = "<b>raw</b> events"  # markup must render as text, not HTML
 
 
 @pytest.fixture
@@ -58,7 +59,16 @@ def live_server(tmp_path):
             [Edge(("c1", "analytics", "mv"), ("c1", "app", "events"), EdgeKind.READS_FROM)],
         )
         set_label(s, "c1", "app", "events", LABEL_KEY, LABEL_VALUE)
-    cfg = AppConfig(storage_url=url, clusters=[ClusterConfig(name="c1", host="localhost")])
+        replace_annotations(s, [{
+            "cluster": "c1", "database": "app", "table_name": "events",
+            "doc": {"description": ANNOTATION_DESC, "status": "deprecated"},
+            "summary": ANNOTATION_DESC, "status": "deprecated", "path": "app/events.yaml",
+        }], sha="x")
+    # pull_interval=0: no poller (nothing to pull — rows are seeded above)
+    cfg = AppConfig(
+        storage_url=url, clusters=[ClusterConfig(name="c1", host="localhost")],
+        annotations=AnnotationsConfig(enabled=True, repo="unused", pull_interval=0),
+    )
 
     config = uvicorn.Config(create_app(cfg), host="127.0.0.1", port=0, log_level="warning")
     server = uvicorn.Server(config)
@@ -137,4 +147,23 @@ def test_row_click_renders_relations_tree(live_server):
 
         # legend lists every label key present in the rendered tree
         assert page.text_content("#legend").strip() == LABEL_KEY
+        browser.close()
+
+
+def test_schema_panel_renders_annotation(live_server):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(live_server)
+        page.wait_for_selector("#rows tr")
+        page.click('#rows tr:has(td:text-is("events"))')
+        page.click("#mindmap me-root me-tpc")
+        page.wait_for_selector("#schema-body .annotation")
+        assert page.text_content("#schema-body .ann-desc") == ANNOTATION_DESC
+        assert page.text_content("#schema-body .ann-badge") == "deprecated"
+        # grain/owner not declared in the fixture's doc -> not rendered at all
+        assert page.locator("#schema-body .ann-key").count() == 0
+        assert "grain" not in page.text_content("#schema-body")
         browser.close()

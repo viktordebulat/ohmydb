@@ -3,6 +3,7 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -51,6 +52,33 @@ class ClusterConfig:
 
 
 @dataclass
+class AnnotationsConfig:
+    """Repo-backed annotation layer (see docs/ANNOTATIONS.md, app/annotations/).
+    `enabled: false` (the default) makes the feature fully inert."""
+
+    enabled: bool = False
+    # https:// or file:// = git remote (file:// mostly for tests); no "://" =
+    # local directory, read as-is (read-only, no git needed).
+    repo: str = ""
+    ref: str = "main"  # branch read (and, in M24, MR target)
+    path: str = ""  # shared root inside the repo/dir
+    # {cluster: root} per-cluster override root; a file missing there falls
+    # back to the same file under `path`.
+    cluster_paths: dict[str, str] = field(default_factory=dict)
+    pull_interval: int = 300  # serve only, seconds; 0 = no polling
+    proposals: bool = False  # M24
+    drift_mr: bool = False  # M24
+    author: str = "ohmydb <ohmydb@noreply.invalid>"  # M24 commit identity
+    # Git HTTPS token: env-only (OHMYDB_ANNOTATIONS_TOKEN), never a yaml key;
+    # repr=False keeps it out of logs/tracebacks.
+    token: str | None = field(default=None, repr=False)
+
+    @property
+    def is_local(self) -> bool:
+        return "://" not in self.repo
+
+
+@dataclass
 class AppConfig:
     storage_url: str
     clusters: list[ClusterConfig]
@@ -62,6 +90,7 @@ class AppConfig:
     # field for it) means auth is off — env-only, like the CH/PG secrets,
     # so a token never ends up in a mounted config file.
     auth_token: str | None = None
+    annotations: AnnotationsConfig = field(default_factory=AnnotationsConfig)
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -79,7 +108,33 @@ def load_config(path: str | Path) -> AppConfig:
         clusters=clusters,
         label_rules=label_rules,
         auth_token=os.environ.get("OHMYDB_AUTH_TOKEN") or None,
+        annotations=_load_annotations(raw.get("annotations") or {}, clusters),
     )
+
+
+def _load_annotations(raw: dict, clusters: list[ClusterConfig]) -> AnnotationsConfig:
+    if "token" in raw:
+        raise ValueError("annotations.token is not a config key — set OHMYDB_ANNOTATIONS_TOKEN env instead")
+    a = AnnotationsConfig(**raw)
+    a.token = os.environ.get("OHMYDB_ANNOTATIONS_TOKEN") or None
+    if a.enabled and not a.repo:
+        raise ValueError("annotations.enabled is true but annotations.repo is empty")
+    if not a.is_local:
+        parts = urlsplit(a.repo)
+        if parts.scheme not in ("https", "file"):
+            raise ValueError(f"annotations.repo: unsupported scheme {parts.scheme!r} (use https:// or file://)")
+        if parts.username or parts.password:
+            raise ValueError(
+                "annotations.repo must not embed credentials — set OHMYDB_ANNOTATIONS_TOKEN env instead"
+            )
+    elif a.proposals or a.drift_mr:
+        raise ValueError("annotations.proposals/drift_mr need a git remote, not a local dir")
+    unknown = set(a.cluster_paths) - {c.name for c in clusters}
+    if unknown:
+        raise ValueError(f"annotations.cluster_paths: unknown cluster(s) {sorted(unknown)}")
+    if a.pull_interval < 0:
+        raise ValueError("annotations.pull_interval must be >= 0")
+    return a
 
 
 def _check_cluster_key_collisions(clusters: list[ClusterConfig]) -> None:

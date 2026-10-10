@@ -7,7 +7,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.models import Edge, EdgeKind, Entity, EntityKind, Identity
-from app.store.db import EdgeRow, EntityRow, LabelRow
+from app.store.db import AnnotationRow, EdgeRow, EntityRow, LabelRow
 
 
 def _reachable(adj: dict[int, set[int]], start: int) -> set[int]:
@@ -126,4 +126,16 @@ def sync_auto_labels(session: Session, cluster: str, auto_labels: list[tuple[Ide
             cluster=cluster, database=database, table_name=name,
             key=key, value=value, source="auto",
         ))
+    session.commit()
+
+
+def replace_annotations(session: Session, rows: list[dict], sha: str) -> None:
+    """Replace the whole materialized annotation copy in one transaction.
+    `rows`: dicts with cluster/database/table_name/doc/summary/status/path
+    (built by app/annotations/service.py: pull, only after a successful
+    fetch + parse). Commits."""
+    now = datetime.now(timezone.utc)
+    session.execute(delete(AnnotationRow))
+    for r in rows:
+        session.add(AnnotationRow(**r, sha=sha, pulled_at=now))
     session.commit()

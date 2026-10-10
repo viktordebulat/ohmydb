@@ -1,0 +1,4 @@
+description: |
+  Raw product data written by the web app backend.
+query_hints:
+  - Tables here are large and unaggregated; always filter on the sorting key.

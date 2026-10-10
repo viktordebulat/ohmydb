@@ -8,7 +8,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.models import EdgeKind
-from app.store.db import EdgeRow, EntityRow, LabelRow
+from app.store.db import AnnotationRow, EdgeRow, EntityRow, LabelRow
 
 
 def _labels_for(session: Session, rows: list[EntityRow]) -> dict[tuple, dict]:
@@ -21,9 +21,24 @@ def _labels_for(session: Session, rows: list[EntityRow]) -> dict[tuple, dict]:
     return out
 
 
-def _node_briefs(session: Session, entities: list[EntityRow]) -> list[dict]:
+def _annotation_briefs(session: Session, rows: Sequence[EntityRow]) -> dict[tuple, tuple[str, str]]:
+    """(summary, status) per entity identity, from table-level annotation
+    rows only — never loads the docs themselves."""
+    identities = {(r.cluster, r.database, r.name) for r in rows}
+    stmt = select(
+        AnnotationRow.cluster, AnnotationRow.database, AnnotationRow.table_name,
+        AnnotationRow.summary, AnnotationRow.status,
+    ).where(AnnotationRow.table_name != "")
+    return {
+        (c, db, t): (summary, status)
+        for c, db, t, summary, status in session.execute(stmt)
+        if (c, db, t) in identities
+    }
+
+
+def _node_briefs(session: Session, entities: list[EntityRow], *, with_annotations: bool = False) -> list[dict]:
     labels = _labels_for(session, entities)
-    return [
+    briefs = [
         {
             "id": e.id,
             "cluster": e.cluster,
@@ -36,13 +51,20 @@ def _node_briefs(session: Session, entities: list[EntityRow]) -> list[dict]:
         }
         for e in entities
     ]
+    if with_annotations:
+        # summary/status are "" for unannotated entities, so the shape is
+        # stable for every row while the feature is on.
+        annotations = _annotation_briefs(session, entities)
+        for b in briefs:
+            b["summary"], b["status"] = annotations.get((b["cluster"], b["database"], b["name"]), ("", ""))
+    return briefs
 
 
 def _matches(node: dict, q: str) -> bool:
     """Match rule shared by any endpoint/tool searching entities. `key:value`
     (colon present) does an exact label lookup — key and value must both
-    match exactly. Otherwise: substring match against name, database, or any
-    label key/value."""
+    match exactly. Otherwise: substring match against name, database, any
+    label key/value, or the annotation summary (when annotations are on)."""
     if ":" in q:
         key, _, value = q.partition(":")
         return node["labels"].get(key) == value
@@ -51,6 +73,7 @@ def _matches(node: dict, q: str) -> bool:
         q in node["name"].lower()
         or q in node["database"].lower()
         or any(q in k.lower() or q in v.lower() for k, v in node["labels"].items())
+        or q in node.get("summary", "").lower()
     )
 
 
@@ -86,6 +109,8 @@ def _filter(
     column_type: str | None,
     match: str,
     kind: str | None,
+    *,
+    with_annotations: bool = False,
 ) -> list[dict]:
     """Shared search filter: every given condition must hold (AND). Column
     conditions run on raw rows (briefs don't carry columns); matching column
@@ -99,7 +124,7 @@ def _filter(
             if names is not None:
                 hits[e.id] = names
         entities = [e for e in entities if e.id in hits]
-    briefs = _node_briefs(session, entities)
+    briefs = _node_briefs(session, entities, with_annotations=with_annotations)
     if hits:
         for b in briefs:
             b["matched_columns"] = hits[b["id"]]
@@ -116,6 +141,8 @@ def list_entities(
     column_type: str | None = None,
     match: str = "all",
     kind: str | None = None,
+    *,
+    with_annotations: bool = False,
 ) -> list[dict]:
     """Node listing, no edges — used by search (find_tables, /api/search)
     which scans across all clusters and doesn't need the full graph. Filters
@@ -124,7 +151,7 @@ def list_entities(
     if cluster is not None:
         stmt = stmt.where(EntityRow.cluster == cluster)
     entities = session.scalars(stmt).all()
-    return _filter(session, entities, q, column, column_type, match, kind)
+    return _filter(session, entities, q, column, column_type, match, kind, with_annotations=with_annotations)
 
 
 def graph_payload(
@@ -135,6 +162,8 @@ def graph_payload(
     column_type: str | None = None,
     match: str = "all",
     kind: str | None = None,
+    *,
+    with_annotations: bool = False,
 ) -> dict:
     # No edges list — redundant with per-entity upstream/downstream
     # (see get_relations); a caller wanting dependency direction for one
@@ -143,14 +172,36 @@ def graph_payload(
     # One value for the whole graph, not per node — a sync writes the same
     # timestamp to every entity of a cluster in one transaction.
     synced_at = max((e.synced_at for e in entities if e.synced_at), default=None)
-    nodes = _filter(session, entities, q, column, column_type, match, kind)
-    return {
+    nodes = _filter(session, entities, q, column, column_type, match, kind, with_annotations=with_annotations)
+    payload = {
         "synced_at": synced_at.isoformat() if synced_at else None,
         "nodes": nodes,
     }
+    if with_annotations and (hints := _cluster_hints(session, cluster)):
+        payload["annotations"] = hints
+    return payload
 
 
-def get_entity(session: Session, cluster: str, database: str, name: str) -> dict | None:
+def _cluster_hints(session: Session, cluster: str) -> dict:
+    """Global + per-database annotation docs for one cluster:
+    {query_hints, databases: {db: {description, query_hints}}}, empty parts
+    omitted."""
+    out: dict = {}
+    rows = session.scalars(
+        select(AnnotationRow).where(AnnotationRow.cluster == cluster, AnnotationRow.table_name == "")
+    ).all()
+    for r in sorted(rows, key=lambda r: r.database):
+        if r.database == "":
+            if r.doc.get("query_hints"):
+                out["query_hints"] = r.doc["query_hints"]
+        else:
+            out.setdefault("databases", {})[r.database] = r.doc
+    return out
+
+
+def get_entity(
+    session: Session, cluster: str, database: str, name: str, *, with_annotations: bool = False
+) -> dict | None:
     row = session.scalar(
         select(EntityRow).where(
             EntityRow.cluster == cluster,
@@ -161,7 +212,7 @@ def get_entity(session: Session, cluster: str, database: str, name: str) -> dict
     if row is None:
         return None
     labels = _labels_for(session, [row])
-    return {
+    payload = {
         "cluster": row.cluster,
         "database": row.database,
         "name": row.name,
@@ -176,6 +227,28 @@ def get_entity(session: Session, cluster: str, database: str, name: str) -> dict
         "labels": labels.get((row.cluster, row.database, row.name), {}),
         "synced_at": row.synced_at.isoformat() if row.synced_at else None,
     }
+    if with_annotations:
+        _attach_annotation(session, payload)
+    return payload
+
+
+def _attach_annotation(session: Session, payload: dict) -> None:
+    """Add `annotation` (doc minus columns, plus repo path) and merge each
+    column's description/values into its column dict. Annotated columns that
+    no longer exist are dropped. No-op for an unannotated entity."""
+    ann = session.scalar(
+        select(AnnotationRow).where(
+            AnnotationRow.cluster == payload["cluster"],
+            AnnotationRow.database == payload["database"],
+            AnnotationRow.table_name == payload["name"],
+        )
+    )
+    if ann is None:
+        return
+    doc = dict(ann.doc)
+    col_docs = doc.pop("columns", {})
+    payload["annotation"] = {**doc, "path": ann.path}
+    payload["columns"] = [{**c, **col_docs.get(c["name"], {})} for c in payload["columns"]]
 
 
 def get_relations(

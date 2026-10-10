@@ -71,6 +71,28 @@ class LabelRow(Base):
     source: Mapped[str] = mapped_column(String(16), default="manual", server_default="manual")
 
 
+class AnnotationRow(Base):
+    """Materialized copy of the annotation repo (app/annotations/service.py:
+    pull), replaced wholesale on every successful pull. Identity-keyed like
+    LabelRow (no FK): database="" + table_name="" is the cluster's global
+    doc, table_name="" a database doc. summary/status are precomputed at pull
+    time so store never needs to import app/annotations."""
+
+    __tablename__ = "annotations"
+    __table_args__ = (UniqueConstraint("cluster", "database", "table_name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cluster: Mapped[str] = mapped_column(String(255))
+    database: Mapped[str] = mapped_column(String(255), default="")
+    table_name: Mapped[str] = mapped_column(String(255), default="")
+    doc: Mapped[dict] = mapped_column(JSON, default=dict)  # normalized
+    summary: Mapped[str] = mapped_column(String(512), default="")
+    status: Mapped[str] = mapped_column(String(16), default="")
+    path: Mapped[str] = mapped_column(String(1024), default="")  # file in the repo
+    sha: Mapped[str] = mapped_column(String(64), default="")
+    pulled_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 def run_migrations(engine: Engine) -> None:
     """Bring the schema at `engine` up to head via Alembic
     (app/migrations/versions/). Runs on the engine's own connection —

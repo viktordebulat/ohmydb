@@ -1,0 +1,8 @@
+description: |
+  Daily event totals, refreshed hourly from app.events.
+grain: one row per day
+query_hints:
+  - Refreshed every hour, so today's value is partial.
+columns:
+  day: {description: "Calendar day, UTC"}
+  cnt: {description: "Events on that day"}

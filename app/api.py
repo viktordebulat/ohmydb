@@ -1,6 +1,9 @@
 """FastAPI app: graph + entity detail + relations JSON, labels CRUD, sync trigger,
 static frontend."""
 
+import asyncio
+import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -8,6 +11,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from app.annotations.service import format_result, poll_forever, sync_annotations
 from app.config import AppConfig
 from app.core.sync import run_sync
 from app.mcp import create_mcp
@@ -22,6 +26,8 @@ from app.store.queries import (
 )
 
 WEB_DIR = Path(__file__).parent / "web"
+
+log = logging.getLogger(__name__)
 
 
 class RevalidatedStaticFiles(StaticFiles):
@@ -43,10 +49,24 @@ class LabelBody(BaseModel):
 
 def create_app(cfg: AppConfig) -> FastAPI:
     factory = make_session_factory(cfg.storage_url)
-    # MCP served over HTTP at /mcp; its lifespan must be handed to the parent
-    # app or the streamable-http session manager never starts.
+    ann = cfg.annotations
+    # MCP served over HTTP at /mcp; its lifespan must be wrapped by the parent
+    # app's or the streamable-http session manager never starts (/mcp 500s).
     mcp_app = create_mcp(cfg).http_app(path="/")
-    app = FastAPI(title="ohmydb", lifespan=mcp_app.lifespan)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        async with mcp_app.lifespan(app):
+            poller = None
+            if ann.enabled and ann.pull_interval > 0:
+                poller = asyncio.create_task(poll_forever(cfg, factory))
+            try:
+                yield
+            finally:
+                if poller is not None:
+                    poller.cancel()
+
+    app = FastAPI(title="ohmydb", lifespan=lifespan)
     app.mount("/mcp", mcp_app)
 
     api = APIRouter(prefix="/api")
@@ -76,7 +96,7 @@ def create_app(cfg: AppConfig) -> FastAPI:
         kind: str | None = None,
     ) -> dict:
         with factory() as s:
-            return graph_payload(s, cluster, q, column, column_type, match, kind)
+            return graph_payload(s, cluster, q, column, column_type, match, kind, with_annotations=ann.enabled)
 
     @api.get("/search")
     def search(
@@ -93,12 +113,14 @@ def create_app(cfg: AppConfig) -> FastAPI:
         if q is None and not column and column_type is None and kind is None:
             raise HTTPException(status_code=400, detail="give at least one of q, column, column_type, kind")
         with factory() as s:
-            return {"nodes": list_entities(s, cluster, q, column, column_type, match, kind)}
+            return {"nodes": list_entities(
+                s, cluster, q, column, column_type, match, kind, with_annotations=ann.enabled
+            )}
 
     @api.get("/entities/{cluster}/{database}/{name}")
     def entity(cluster: str, database: str, name: str) -> dict:
         with factory() as s:
-            payload = get_entity(s, cluster, database, name)
+            payload = get_entity(s, cluster, database, name, with_annotations=ann.enabled)
         if payload is None:
             raise HTTPException(status_code=404, detail="entity not found")
         return payload
@@ -134,6 +156,13 @@ def create_app(cfg: AppConfig) -> FastAPI:
             raise HTTPException(
                 status_code=404, detail=f"no cluster matched {cluster!r}"
             )
+        if ann.enabled:
+            # Schema sync succeeded; an annotation failure is only logged and
+            # the response shape stays the same either way.
+            try:
+                log.info(format_result(sync_annotations(cfg, factory)))
+            except Exception as e:
+                log.warning("annotations pull failed: %s", e)
         return results
 
     app.include_router(api)

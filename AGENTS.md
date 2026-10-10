@@ -51,6 +51,9 @@ Config/deploy notes not covered there:
   the three mutating HTTP routes (`POST /sync`, `PUT`/`DELETE /labels`) —
   unset by default, reads/MCP unaffected either way. See README's Auth
   section for the request example.
+  `annotations` block (off by default): repo-backed annotation layer, see
+  `docs/ANNOTATIONS.md`; its git token is env-only
+  (`OHMYDB_ANNOTATIONS_TOKEN`), a `token:` yaml key is rejected.
 - `.mcp.json.example` — MCP registration for AI coding agents: `cp .mcp.json.example .mcp.json` (`.mcp.json` itself is gitignored). Two entries: `ohmydb` (stdio, spawns `uv run ohmydb mcp`; add `--project <path>` to `args` when registering globally) and `ohmydb-http` (connects to a running `serve` at `http://127.0.0.1:8080/mcp/`). Keep one, drop the other.
 - `docker-compose.yaml` + `seed/` — local ClickHouse with sample schema for testing.
 

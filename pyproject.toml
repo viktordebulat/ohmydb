@@ -12,6 +12,8 @@ dependencies = [
   "fastmcp>=3.4.4",
   "psycopg[binary]>=3.3.4",
   "alembic>=1.18.5",
+  "pydantic>=2.13.4",
+  "ruamel-yaml>=0.19.1",
 ]
 
 [dependency-groups]
