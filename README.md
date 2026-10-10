@@ -100,8 +100,8 @@ annotations:
 Token for private repos: `OHMYDB_ANNOTATIONS_TOKEN` env only (GitLab: project
 access token, Reporter + `read_repository`; for writes Developer +
 `write_repository`. GitHub: fine-grained PAT, Contents, plus Pull requests
-for writes. Protect `ref` so the bot can only open MRs/PRs); the image ships
-`git`. CLI:
+for writes. Protect `ref` so the bot can only open MRs/PRs; details in
+[Token scopes](docs/ANNOTATIONS.md#token-scopes)); the image ships `git`. CLI:
 `ohmydb annotations pull`, `ohmydb annotations validate DIR` (CI for the
 annotation repo), `ohmydb annotations schema` (JSON Schema for editors).
 Format, cluster overrides and security notes:

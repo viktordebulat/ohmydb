@@ -237,30 +237,41 @@ For VS Code (redhat.vscode-yaml):
 
 ## Git auth and security
 
+### Token scopes
+
+One token, in `OHMYDB_ANNOTATIONS_TOKEN`, for everything. Give it the least
+the enabled features need:
+
+| Host | Features on | Token | Scopes / permissions |
+|---|---|---|---|
+| GitLab | reads only | Project access token (Settings → Access tokens) | Role **Reporter**, scope **`read_repository`** |
+| GitLab | `proposals` / `drift_mr` | Project access token | Role **Developer**, scope **`write_repository`**. No `api` scope: the push itself opens the MR (push options) |
+| GitHub | reads only | Fine-grained PAT, *Only select repositories* → the annotation repo | **Contents: Read-only** (Metadata: Read-only is added automatically) |
+| GitHub | `proposals` / `drift_mr` | Fine-grained PAT, same repo selection | **Contents: Read and write** + **Pull requests: Read and write**. No Issues permission needed (the `ohmydb` label still applies) |
+
+- Verified: GitHub reads and writes, private repo, 2026-10-10. GitLab reads
+  and writes follow GitLab's docs but haven't been run against a real
+  instance yet.
+- Avoid broader tokens: a GitLab personal token or `api` scope, or a GitHub
+  classic PAT (`repo` covers every private repo the user can see).
+- On GitHub the token goes to git as Basic auth (`oauth2:<token>`; GitHub
+  ignores the user name) and to `api.github.com` as `Bearer`, for the PR
+  call only.
+- **Protect `ref` for any write token**, or the bot can push to it directly.
+  GitLab: protected branch with no push for Developers, approvals required,
+  CODEOWNERS per db dir. GitHub: a branch ruleset on `ref` (require a pull
+  request + approval, block force pushes, CODEOWNERS review). Rulesets and
+  branch protection on a *private* GitHub repo need Pro/Team.
+- If GitLab push rules check the commit email, set `author` to match.
+
+### Transport and other notes
+
 - **The token never appears in a URL, argv, on disk, or in logs.** git gets
   it as an HTTP header via env: `GIT_TERMINAL_PROMPT=0`,
   `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=http.<scheme://host[:port]>/.extraHeader`
   (scoped to the repo host), `GIT_CONFIG_VALUE_0=Authorization: Basic
   base64("oauth2:"+token)`. git stderr is therefore safe to show in errors.
   Needs `git >= 2.31`. Internal CA: `GIT_SSL_CAINFO`. Proxy: `HTTPS_PROXY`.
-- **GitLab, read-only:** project access token, role Reporter, scope
-  `read_repository`.
-- **GitLab, proposals / drift MR:** project access token, role Developer,
-  scope `write_repository`. The push creates the MR, so no `api` scope.
-  **Protect `ref`** (no push for Developers, approvals required, CODEOWNERS
-  per db dir): the bot can then only open MRs. If GitLab push rules check
-  the commit email, set `author` to match.
-- **GitHub, read-only (verified):** fine-grained PAT, *Only select
-  repositories* → the annotation repo, Repository permissions → Contents:
-  Read-only. GitHub ignores the `oauth2` username. Reads work with any git
-  host that accepts HTTP basic auth with a token.
-- **GitHub, proposals / drift PR (verified):** same PAT with Contents: Read
-  and write and Pull requests: Read and write (the same token is sent as a
-  Bearer header to `api.github.com`). Add a branch ruleset on `ref` (require
-  a pull request + approval, block force pushes, CODEOWNERS review) so the
-  token can only open PRs. Rulesets and branch protection on a *private*
-  repo need GitHub Pro/Team; without them a Contents-write token can push
-  to `ref` directly.
 - A rejected or missing token fails with git's own message plus a hint to
   check `OHMYDB_ANNOTATIONS_TOKEN`.
 - **Repo placement:** a dedicated repo gives least privilege. A subdir of
