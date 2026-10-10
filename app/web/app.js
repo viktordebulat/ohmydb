@@ -407,9 +407,9 @@ async function showSchema(cluster, database, name) {
   const colRows = (e.columns || []).map(c => `
     <tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.type)}</td><td>${escapeHtml(c.comment || '')}</td>${descCell(c)}</tr>`).join('');
   schemaBodyEl.innerHTML = `
-    ${ann ? annotationHtml(ann) : ''}
     <table class="meta-table"><tbody>${metaRows}</tbody></table>
-    <table><thead><tr><th>column</th><th>type</th><th>comment</th>${ann ? '<th>description</th>' : ''}</tr></thead><tbody>${colRows}</tbody></table>`;
+    <table><thead><tr><th>column</th><th>type</th><th>comment</th>${ann ? '<th>description</th>' : ''}</tr></thead><tbody>${colRows}</tbody></table>
+    ${ann ? annotationHtml(ann) : ''}`;
 }
 
 function closeRelations() {
