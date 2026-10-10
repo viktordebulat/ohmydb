@@ -16,6 +16,10 @@ from urllib.parse import urlsplit
 
 TIMEOUT = 300  # seconds per git call; a hung remote must not wedge the poller
 
+# stderr fragments git/hosts emit on a rejected or missing credential
+# (GitHub: "could not read Username"; GitLab: "HTTP Basic: Access denied").
+_AUTH_FAILURE_MARKERS = ("could not read Username", "Authentication failed", "Access denied", "error: 401", "error: 403")
+
 
 class GitError(RuntimeError):
     pass
@@ -43,7 +47,15 @@ def _run(args: list[str], url: str, token: str | None, cwd: Path | None = None) 
     except subprocess.TimeoutExpired:
         raise GitError(f"git {args[0]} timed out after {TIMEOUT}s") from None
     if r.returncode != 0:
-        raise GitError(f"git {args[0]} failed: {r.stderr.strip()}")
+        stderr = r.stderr.strip()
+        # git's wording for a rejected/missing token is cryptic ("could not
+        # read Username ... terminal prompts disabled") — say what to check.
+        hint = ""
+        if any(m in stderr for m in _AUTH_FAILURE_MARKERS):
+            state = "set" if token else "not set"
+            hint = (f" — authentication failed: check OHMYDB_ANNOTATIONS_TOKEN ({state}) "
+                    "is valid and has read access to the repo")
+        raise GitError(f"git {args[0]} failed: {stderr}{hint}")
     return r.stdout
 
 

@@ -110,6 +110,14 @@ Gotchas discovered during implementation. Append after each task, then compact
   enum keys (dict keys too — verified). A per-cluster override root nested
   in the shared root (default `path: ""`) shows up as a "database" dir in
   the shared scan; `service._load_trees` excludes such top-level dirs.
+- Testing annotation git auth on a dev machine: the macOS keychain
+  credential helper (global git config) silently supplies your own GitHub
+  credentials, so a pull "works" even with no/wrong token. Isolate with
+  `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1` (prod containers have
+  no helper). Verified 2026-10-10 against a private GitHub repo: the
+  `Basic oauth2:<fine-grained PAT>` header works; a bad/missing token
+  yields git's cryptic "could not read Username … terminal prompts
+  disabled", hence the auth hint in `gitrepo._run`.
 - `create_app` lifespan: wrap, don't replace, `mcp_app.lifespan` — an
   `asynccontextmanager` doing `async with mcp_app.lifespan(app):` then
   starting extra background tasks keeps `/mcp` working. `TestClient(app)`

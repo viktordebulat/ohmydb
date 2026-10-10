@@ -163,8 +163,13 @@ For VS Code (redhat.vscode-yaml):
   base64("oauth2:"+token)`. git stderr is therefore safe to show in errors.
   Needs `git >= 2.31`. Internal CA: `GIT_SSL_CAINFO`. Proxy: `HTTPS_PROXY`.
 - **GitLab, read-only:** project access token, role Reporter, scope
-  `read_repository`. Reads work with any git host that accepts HTTP basic
-  auth with a token.
+  `read_repository`.
+- **GitHub, read-only (verified):** fine-grained PAT, *Only select
+  repositories* → the annotation repo, Repository permissions → Contents:
+  Read-only. GitHub ignores the `oauth2` username. Reads work with any git
+  host that accepts HTTP basic auth with a token; writes (M24) need GitLab.
+- A rejected or missing token fails with git's own message plus a hint to
+  check `OHMYDB_ANNOTATIONS_TOKEN`.
 - **Repo placement:** a dedicated repo gives least privilege. A subdir of
   the migrations repo (set `path`) lets schema and annotations change in one
   MR, but a write-enabled bot (M24) then has push rights there.
