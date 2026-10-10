@@ -189,12 +189,85 @@ app-level auth (guard `/mcp` at the proxy).
 Returns `{status, branch, merge_request, path}`. `merge_request` is the URL
 of the MR/PR (`null` if GitLab printed none on push).
 
+#### Request examples
+
+Against the seed schema (`task up`), with `OHMYDB_AUTH_TOKEN` set:
+
 ```bash
-curl -X POST http://127.0.0.1:8080/api/annotations/local/app/events/proposals \
+curl -X POST http://127.0.0.1:8080/api/annotations/local/analytics/events_hourly/proposals \
   -H "Authorization: Bearer $OHMYDB_AUTH_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"patch": {"columns": {"ts": {"description": "Event time, UTC"}}},
-       "rationale": "Checked the producer: ts is set server-side in UTC"}'
+  -d @- <<'JSON'
+{
+  "patch": {
+    "owner": "team-analytics",
+    "query_hints": [
+      "SummingMergeTree, rows may not be collapsed yet. Always use sum(cnt) with GROUP BY, never read cnt raw.",
+      "Fed only by analytics.events_hourly_mv: rows exist from the MV creation time on, no backfill."
+    ],
+    "relationships": [
+      {"to": "app.events", "from_columns": ["event_type"], "to_columns": ["event_type"],
+       "cardinality": "one_to_many", "description": "Drill down from an hourly bucket to raw events"}
+    ]
+  },
+  "rationale": "Hourly table has no backfill\nChecked the MV DDL: plain TO-table MV, no POPULATE, so history starts at MV creation."
+}
+JSON
 ```
+
+`200`:
+
+```json
+{"status": "proposed",
+ "branch": "ohmydb/propose/analytics.events_hourly-20261010T171957Z-81ca",
+ "merge_request": "https://github.com/acme/schema-annotations/pull/4",
+ "path": "analytics/events_hourly.yaml"}
+```
+
+The MR/PR adds `owner`, the second hint and the relationship. The first
+hint was sent back unchanged (lists are replaced whole), so it stays as is.
+Every other line of the file is untouched.
+
+Patch recipes (the `patch` value only):
+
+```jsonc
+// describe a column, keep everything else
+{"columns": {"cnt": {"description": "Events in the hour; partial until merged"}}}
+// enum meanings (map form; a plain list of values works too)
+{"columns": {"event_type": {"values": {"click": "element click", "view": "page view"}}}}
+// deprecate in favor of another table (must exist in the cluster)
+{"status": "deprecated", "use_instead": "analytics.daily_counts"}
+// add a verified query: send the current examples too, or they are dropped
+{"examples": [{"question": "Events per type yesterday", "sql": "SELECT event_type, sum(cnt) FROM ..."}]}
+// delete a key / a column's annotation
+{"owner": null, "columns": {"old_col": null}}
+```
+
+Errors (`detail` lists every problem, so fix them all and retry):
+
+```text
+401  {"detail": "missing or invalid bearer token"}
+404  {"detail": ["entity not found: local/analytics/nope"]}
+422  {"detail": ["rationale: required — say what you verified and how"]}
+422  {"detail": ["columns.total: analytics.events_hourly has no such column",
+                 "relationships.0.to: analytics.ghost not found in cluster local"]}
+422  {"detail": ["status: Input should be '', 'active' or 'deprecated'"]}
+```
+
+The rationale and path checks run first, so their error comes back alone;
+schema and catalog problems come back together. `{"status": "unchanged",
+"path": ...}` (`200`, no MR) means the patch didn't change the file.
+
+MCP takes the same arguments:
+
+```json
+{"tool": "propose_annotation",
+ "arguments": {"cluster": "local", "database": "app", "name": "users",
+               "patch": {"query_hints": ["Soft-deleted rows have deleted_at set."]},
+               "rationale": "Read the users service code: deletes set deleted_at, rows stay"}}
+```
+
+A rejected MCP call is a tool error whose text holds the same messages, one
+per line.
 
 ### Drift MR (`drift_mr: true`)
 
