@@ -196,6 +196,22 @@ tbody tr.selected { background: var(--border); }
 #schema-body .meta-table th {
   width: 100px; text-transform: none; letter-spacing: 0; vertical-align: top; white-space: nowrap;
 }
+/* annotation block (see annotationHtml in app.js) */
+#schema-body .annotation { font-size: 12.5px; color: var(--ink); margin-bottom: 12px; }
+#schema-body .ann-desc { white-space: pre-wrap; margin-bottom: 6px; }
+#schema-body .ann-line { margin-bottom: 6px; color: var(--ink-2); }
+#schema-body .ann-badge {
+  display: inline-block; padding: 0 6px; border: 1px solid var(--muted); border-radius: 4px;
+  font-size: 11px; color: var(--ink);
+}
+#schema-body .ann-h { margin-top: 8px; color: var(--muted); font-size: 11px; }
+#schema-body .annotation ul { margin: 2px 0 0; padding-left: 18px; }
+#schema-body .annotation li { margin: 2px 0; }
+#schema-body .annotation code, #schema-body .annotation pre {
+  font-size: 11.5px; background: var(--page); border-radius: 4px; padding: 1px 4px;
+}
+#schema-body .annotation pre { margin: 4px 0 8px; padding: 6px 8px; overflow-x: auto; }
+#schema-body .ann-values { color: var(--muted); font-size: 11px; }
 
 /* small translucent block, floated over the top-left of the graph */
 #legend {

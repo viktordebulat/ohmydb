@@ -26,6 +26,22 @@ storage:
 #   - match: {kind: dictionary}
 #     label: {key: source, value: dictionary}
 
+# Optional: human-curated annotations (descriptions, units, enum values, join
+# keys, query hints, verified examples) from a git repo — served by get_table,
+# listings and the frontend. Format + setup: docs/ANNOTATIONS.md.
+# Validate a tree with `ohmydb annotations validate DIR`.
+annotations:
+  enabled: true
+  repo: seed/annotations     # local dir (no "://"): read as-is, no git needed
+  pull_interval: 30          # serve re-checks every N seconds; 0 = only on sync
+  # Git remote instead (any host for reads). Token via OHMYDB_ANNOTATIONS_TOKEN
+  # env only — never put credentials in the URL (load fails if you do).
+  # repo: https://gitlab.example.com/data/schema-annotations.git
+  # ref: main                 # branch to read
+  # path: ""                  # shared root inside the repo
+  # cluster_paths: {}         # {cluster: root} override; missing files fall back to `path`
+  # pull_interval: 300
+
 # Credential env precedence per cluster (highest wins):
 #   CLICKHOUSE_USER__<KEY> / CLICKHOUSE_PASSWORD__<KEY>   (KEY = cluster name,
 #     uppercased, non-alphanumerics -> "_", e.g. "prod-eu" -> "PROD_EU")

@@ -1,0 +1,5 @@
+# Applies to every cluster. See docs/ANNOTATIONS.md for the format.
+version: 1
+query_hints:
+  - All DateTime columns are UTC.
+  - Prefer the pre-aggregated analytics.* tables over scanning app.events.

@@ -350,6 +350,32 @@ async function showRelations(cluster, database, name) {
 
 let lastSchemaDdl = '';
 
+// Human-curated annotation (repo-backed, see docs/ANNOTATIONS.md). All text is
+// escaped: it reaches us through MRs/proposals, so treat it as untrusted.
+function annotationHtml(a) {
+  const parts = [];
+  if (a.description) parts.push(`<div class="ann-desc">${escapeHtml(a.description.trim())}</div>`);
+  if (a.status === 'deprecated' || a.use_instead) {
+    const badge = a.status === 'deprecated' ? '<span class="ann-badge">deprecated</span> ' : '';
+    const instead = a.use_instead ? `use <code>${escapeHtml(a.use_instead)}</code> instead` : '';
+    parts.push(`<div class="ann-line">${badge}${instead}</div>`);
+  }
+  const list = (title, items) => items && items.length
+    ? `<div class="ann-h">${title}</div><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul>` : '';
+  parts.push(list('query hints', (a.query_hints || []).map(escapeHtml)));
+  parts.push(list('relationships', (a.relationships || []).map(r =>
+    `→ <code>${escapeHtml(r.to)}</code> (${escapeHtml(r.from_columns.join(', '))} → ` +
+    `${escapeHtml(r.to_columns.join(', '))}${r.cardinality ? ', ' + escapeHtml(r.cardinality) : ''})` +
+    (r.description ? ` — ${escapeHtml(r.description)}` : ''))));
+  parts.push(list('examples', (a.examples || []).map(x =>
+    `${escapeHtml(x.question)}<pre>${escapeHtml(x.sql.trim())}</pre>`)));
+  return `<div class="annotation">${parts.join('')}</div>`;
+}
+
+const valuesText = (v) => !v ? ''
+  : Array.isArray(v) ? v.join(', ')
+  : Object.entries(v).map(([k, d]) => `${k} = ${d}`).join(', ');
+
 async function showSchema(cluster, database, name) {
   mindmapAreaEl.classList.add('schema-open');
   schemaTitleEl.textContent = `${cluster}/${database}/${name}`;
@@ -364,18 +390,26 @@ async function showSchema(cluster, database, name) {
   const e = await res.json();
   lastSchemaDdl = e.ddl || '';
   schemaCopyBtn.disabled = !lastSchemaDdl;
+  const ann = e.annotation;
   const meta = [
+    ['grain', ann && ann.grain],
+    ['owner', ann && ann.owner],
     ['kind', e.kind],
     ['engine', e.engine_full || e.engine || ''],
     ['primary key', e.primary_key || ''],
     ['sorting key', e.sorting_key || ''],
   ].filter(([, v]) => v);
   const metaRows = meta.map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join('');
+  // description column only for annotated entities — unannotated ones keep
+  // the original three-column layout.
+  const descCell = (c) => !ann ? '' : `<td>${escapeHtml(c.description || '')}` +
+    (c.values ? `<div class="ann-values">${escapeHtml(valuesText(c.values))}</div>` : '') + '</td>';
   const colRows = (e.columns || []).map(c => `
-    <tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.type)}</td><td>${escapeHtml(c.comment || '')}</td></tr>`).join('');
+    <tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.type)}</td><td>${escapeHtml(c.comment || '')}</td>${descCell(c)}</tr>`).join('');
   schemaBodyEl.innerHTML = `
+    ${ann ? annotationHtml(ann) : ''}
     <table class="meta-table"><tbody>${metaRows}</tbody></table>
-    <table><thead><tr><th>column</th><th>type</th><th>comment</th></tr></thead><tbody>${colRows}</tbody></table>`;
+    <table><thead><tr><th>column</th><th>type</th><th>comment</th>${ann ? '<th>description</th>' : ''}</tr></thead><tbody>${colRows}</tbody></table>`;
 }
 
 function closeRelations() {

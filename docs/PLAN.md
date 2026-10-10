@@ -343,6 +343,22 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   `/api/search` reject a call with no filter (would dump the catalog).
   Known limitation: one `column_type` for all patterns — per-column types
   ("user_id:UInt64 AND ts:DateTime") not expressible; add if asked.
+- **M23 (2026-10-10)**: annotation layer, read path (see Planned section
+  below for the decision record, `docs/ANNOTATIONS.md` for the format). New
+  `app/annotations/` package: pydantic models + `load_tree()` (strict keys,
+  per-file errors, fatal on missing root / `version != 1`), `gitrepo.py`
+  (git CLI, token as `GIT_CONFIG_*` extraHeader, never in URL/argv),
+  `service.py` (`pull()` = fresh shallow clone or local dir → per-cluster
+  file-level fallback → `replace_annotations()`; `poll_forever()` in
+  `serve`'s lifespan). New `annotations` table (migration `5109057f8abb`).
+  Reads gated by `with_annotations=` in `store/queries.py`: entity
+  `annotation` + column `description`/`values`, briefs `summary`/`status`,
+  `q` matches summary, graph-level hints block; flag off = unchanged
+  payloads. CLI `annotations pull|validate|schema`; frontend schema panel;
+  sample tree `seed/annotations/` (wired in `config.example.yaml`); `git` in
+  both Docker stages. Deviation from the handoff: an override root nested in
+  the shared root (e.g. `clusters/prod` under `""`) is skipped by the shared
+  scan, and `validate --exclude` does the same offline.
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
@@ -407,7 +423,8 @@ durable decision record.
 
 Delivery as two PRs: **M23** read path (config, format + CLIs, seed,
 storage + migration, pull/poll, MCP/API/UI surfacing, git in the Docker
-image), then **M24** write path (proposals via MCP/HTTP, drift MR).
+image) — shipped, see M23 above; then **M24** write path (proposals via
+MCP/HTTP, drift MR) — next.
 
 Deferred (move to Backlog once M24 ships): GitHub/Gitea PR creation, a
 CI/webhook-triggered pull endpoint, Ossie export, reverse relationships or a

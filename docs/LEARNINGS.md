@@ -103,6 +103,19 @@ Gotchas discovered during implementation. Append after each task, then compact
   (`?column=a&column=b`) need an explicit `= Query(None)`; a bare
   `list[str] | None = None` is read as a request body.
 
+- Annotations (M23): YAML flow maps split on commas — `{description:
+  Event time, UTC}` is two keys, and the handoff's own example had it. The
+  strict models (`extra="forbid"`) caught it on the first seed load; quote
+  such values. Pydantic v2 needs `coerce_numbers_to_str` for `1: active`
+  enum keys (dict keys too — verified). A per-cluster override root nested
+  in the shared root (default `path: ""`) shows up as a "database" dir in
+  the shared scan; `service._load_trees` excludes such top-level dirs.
+- `create_app` lifespan: wrap, don't replace, `mcp_app.lifespan` — an
+  `asynccontextmanager` doing `async with mcp_app.lifespan(app):` then
+  starting extra background tasks keeps `/mcp` working. `TestClient(app)`
+  without `with` never runs the lifespan; uvicorn (test_web_ui) does, so
+  set `pull_interval=0` in test configs.
+
 ## Docker
 
 - `uv sync` installs the project **editable** by default (a `.pth` pointing at the

@@ -73,3 +73,40 @@ clusters:
 """)
     with pytest.raises(ValueError, match="unknown match key"):
         load_config(path)
+
+
+def _write_annotations(tmp_path, block):
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "storage:\n  type: sqlite\n  url: sqlite:///x.sqlite\n"
+        "clusters:\n  - name: prod\n    host: localhost\n"
+        f"annotations:\n{block}"
+    )
+    return path
+
+
+def test_annotations_default_off(tmp_path):
+    assert load_config(_write(tmp_path, ["prod"])).annotations.enabled is False
+
+
+def test_annotations_token_from_env_only(tmp_path, monkeypatch):
+    path = _write_annotations(tmp_path, "  enabled: true\n  repo: https://git.example.com/a.git\n")
+    monkeypatch.setenv("OHMYDB_ANNOTATIONS_TOKEN", "tok")
+    a = load_config(path).annotations
+    assert a.token == "tok" and "tok" not in repr(a)
+    monkeypatch.setenv("OHMYDB_ANNOTATIONS_TOKEN", "")
+    assert load_config(path).annotations.token is None
+
+
+@pytest.mark.parametrize("block, err", [
+    ("  enabled: true\n", "repo is empty"),
+    ("  repo: https://u:p@git.example.com/a.git\n", "OHMYDB_ANNOTATIONS_TOKEN"),
+    ("  repo: ssh://git.example.com/a.git\n", "unsupported scheme"),
+    ("  repo: some/dir\n  proposals: true\n", "git remote"),
+    ("  repo: some/dir\n  cluster_paths: {nope: x}\n", "unknown cluster"),
+    ("  repo: some/dir\n  pull_interval: -1\n", ">= 0"),
+    ("  repo: some/dir\n  token: x\n", "OHMYDB_ANNOTATIONS_TOKEN"),
+])
+def test_annotations_config_rejects(tmp_path, block, err):
+    with pytest.raises(ValueError, match=err):
+        load_config(_write_annotations(tmp_path, block))

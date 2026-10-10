@@ -1,0 +1,14 @@
+description: |
+  Hourly event counts per event_type, fed by analytics.events_hourly_mv.
+grain: one row per (hour, event_type) after merges
+query_hints:
+  - SummingMergeTree, rows may not be collapsed yet. Always use sum(cnt) with GROUP BY, never read cnt raw.
+columns:
+  hour: {description: "Start of the hour, UTC"}
+  event_type: {description: "Same values as app.events.event_type"}
+  cnt: {description: "Number of events in the hour; partial until merged, so sum() it"}
+examples:
+  - question: Events per type yesterday
+    sql: |
+      SELECT event_type, sum(cnt) FROM analytics.events_hourly
+      WHERE hour >= yesterday() AND hour < today() GROUP BY event_type

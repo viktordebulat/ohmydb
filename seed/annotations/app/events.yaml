@@ -1,0 +1,26 @@
+description: |
+  Raw user interaction events (clicks, page views, checkout purchases) from the web app.
+  ~2B rows/day, 90d TTL.
+grain: one row per client event
+status: active
+owner: team-web
+query_hints:
+  - Always filter on ts (sorting key).
+  - For hourly counts use analytics.events_hourly.
+columns:
+  ts: {description: "Event time, UTC"}
+  user_id: {description: "Acting user; joins to app.users.id"}
+  event_type:
+    description: Interaction kind
+    values: {click: element click, view: page view, purchase: checkout done}
+  payload: {description: "Raw JSON sent by the client; schema varies by event_type"}
+relationships:
+  - to: app.users
+    from_columns: [user_id]
+    to_columns: [id]
+    cardinality: many_to_one
+examples:
+  - question: Purchases per day, last 7 days
+    sql: |
+      SELECT toDate(ts) AS d, count() FROM app.events
+      WHERE event_type = 'purchase' AND ts >= today() - 7 GROUP BY d ORDER BY d
