@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass, field
+from email.utils import parseaddr
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -60,15 +61,17 @@ class AnnotationsConfig:
     # https:// or file:// = git remote (file:// mostly for tests); no "://" =
     # local directory, read as-is (read-only, no git needed).
     repo: str = ""
-    ref: str = "main"  # branch read (and, in M24, MR target)
+    ref: str = "main"  # branch read + MR target
     path: str = ""  # shared root inside the repo/dir
     # {cluster: root} per-cluster override root; a file missing there falls
     # back to the same file under `path`.
     cluster_paths: dict[str, str] = field(default_factory=dict)
     pull_interval: int = 300  # serve only, seconds; 0 = no polling
-    proposals: bool = False  # M24
-    drift_mr: bool = False  # M24
-    author: str = "ohmydb <ohmydb@noreply.invalid>"  # M24 commit identity
+    proposals: bool = False  # MCP propose_annotation + HTTP proposals route (GitLab MRs)
+    drift_mr: bool = False  # rolling stub MR on branch ohmydb/drift after each sync
+    # Commit identity of the bot; the drift step also uses its email to tell
+    # its own commits from human ones on the drift branch.
+    author: str = "ohmydb <ohmydb@noreply.invalid>"
     # Git HTTPS token: env-only (OHMYDB_ANNOTATIONS_TOKEN), never a yaml key;
     # repr=False keeps it out of logs/tracebacks.
     token: str | None = field(default=None, repr=False)
@@ -86,7 +89,7 @@ class AppConfig:
     # label_rules (additive — see app/core/labeling.py).
     label_rules: list[dict] = field(default_factory=list)
     # Bearer token guarding mutating HTTP endpoints (POST /sync, PUT/DELETE
-    # /labels) — see app/api.py: require_token. None (the default, no yaml
+    # /labels, annotation proposals) — see app/api.py: require_token. None (the default, no yaml
     # field for it) means auth is off — env-only, like the CH/PG secrets,
     # so a token never ends up in a mounted config file.
     auth_token: str | None = None
@@ -134,6 +137,8 @@ def _load_annotations(raw: dict, clusters: list[ClusterConfig]) -> AnnotationsCo
         raise ValueError(f"annotations.cluster_paths: unknown cluster(s) {sorted(unknown)}")
     if a.pull_interval < 0:
         raise ValueError("annotations.pull_interval must be >= 0")
+    if "@" not in parseaddr(a.author)[1]:
+        raise ValueError(f"annotations.author must look like 'Name <email>', got {a.author!r}")
     return a
 
 

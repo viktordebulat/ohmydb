@@ -6,8 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 from fastmcp import Client
 
-from app.annotations.model import FatalTreeError, load_tree
-from app.annotations.service import pull
+from app.annotations import gitrepo
+from app.annotations.model import FatalTreeError, dump_rt, load_rt, load_tree, merge_patch, render_stub
+from app.annotations.service import pull, sync_annotations
 from app.api import create_app
 from app.config import AnnotationsConfig, AppConfig, ClusterConfig
 from app.core.models import Column, Entity, EntityKind
@@ -205,22 +206,151 @@ def test_fatal_pull_keeps_last_good_copy(pulled):
     assert "annotation" in e
 
 
-@pytest.mark.skipif(not shutil.which("git"), reason="git not installed")
-def test_pull_from_bare_remote(tmp_path):
-    url, factory = _catalog(tmp_path)
+needs_git = pytest.mark.skipif(not shutil.which("git"), reason="git not installed")
+
+
+def _git(*args, cwd=None) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
+
+
+@pytest.fixture
+def remote(tmp_path):
+    """Bare repo seeded with _base_tree, reachable over file:// like a real
+    remote. advertisePushOptions: the write path pushes with GitLab -o options."""
     bare, work = tmp_path / "remote.git", tmp_path / "work"
-
-    def git(*args, cwd=None):
-        subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
-
-    git("init", "--bare", "--initial-branch=main", str(bare))
-    git("init", "--initial-branch=main", str(work))
+    _git("init", "--bare", "--initial-branch=main", str(bare))
+    _git("config", "receive.advertisePushOptions", "true", cwd=bare)
+    _git("init", "--initial-branch=main", str(work))
     _base_tree(work)
-    git("add", ".", cwd=work)
-    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init", cwd=work)
-    git("push", str(bare), "main", cwd=work)
+    _git("add", ".", cwd=work)
+    _git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init", cwd=work)
+    _git("push", str(bare), "main", cwd=work)
+    return bare
 
-    result = pull(_cfg(url, f"file://{bare}"), factory)
+
+@needs_git
+def test_pull_from_bare_remote(tmp_path, remote):
+    url, factory = _catalog(tmp_path)
+    result = pull(_cfg(url, f"file://{remote}"), factory)
     assert len(result["sha"]) == 40 and result["files"] == 4
-    e = TestClient(create_app(_cfg(url, f"file://{bare}"))).get("/api/entities/c1/app/events").json()
+    e = TestClient(create_app(_cfg(url, f"file://{remote}"))).get("/api/entities/c1/app/events").json()
     assert e["annotation"]["status"] == "deprecated"
+
+
+# --- write path (M24) ---
+
+def test_merge_patch_keeps_untouched_lines():
+    text = "# owned by team-web\ndescription: Events  # keep me\ncolumns:\n  ts: {description: \"UTC\"}\n"
+    doc = merge_patch(load_rt(text), {"grain": "one row per event", "columns": {"ts": None, "id": {"description": "pk"}}})
+    out = dump_rt(doc)
+    assert out.startswith("# owned by team-web\ndescription: Events  # keep me\n")
+    assert load_rt(out) == {"description": "Events", "columns": {"id": {"description": "pk"}}, "grain": "one row per event"}
+
+
+def _branches(bare) -> list[str]:
+    return _git("for-each-ref", "--format=%(refname:short)", "refs/heads", cwd=bare).split()
+
+
+@needs_git
+def test_propose_via_mcp_opens_branch(tmp_path, remote):
+    url, _ = _catalog(tmp_path)
+    cfg = _cfg(url, f"file://{remote}", proposals=True)
+
+    async def go():
+        async with Client(create_mcp(cfg)) as client:
+            return (await client.call_tool("propose_annotation", {
+                "cluster": "c1", "database": "app", "name": "users",
+                "patch": {"description": "Registered users", "columns": {"id": {"description": "User id"}}},
+                "rationale": "Checked app code\nids come from the signup service",
+            })).data
+
+    result = asyncio.run(go())
+    assert result["status"] == "proposed" and result["path"] == "app/users.yaml"
+    assert result["branch"].startswith("ohmydb/propose/app.users-") and result["branch"] in _branches(remote)
+    shown = _git("show", f"{result['branch']}:app/users.yaml", cwd=remote)
+    assert load_rt(shown) == {"description": "Registered users", "columns": {"id": {"description": "User id"}}}
+    msg = _git("log", "-1", "--format=%an <%ae>%n%B", result["branch"], cwd=remote)
+    assert msg.startswith("ohmydb <ohmydb@noreply.invalid>\nannotations(app.users): Checked app code\n")
+    assert "via MCP" in msg
+
+
+@needs_git
+def test_propose_rejects_hallucinations_over_http(tmp_path, remote):
+    url, _ = _catalog(tmp_path)
+    client = TestClient(create_app(_cfg(url, f"file://{remote}", proposals=True)))
+    r = client.post("/api/annotations/c1/app/events/proposals", json={
+        "patch": {"columns": {"nope": {"description": "x"}},
+                  "relationships": [{"to": "app.ghost", "from_columns": ["ts"], "to_columns": ["id"]}]},
+        "rationale": "guess",
+    })
+    assert r.status_code == 422
+    errors = "\n".join(r.json()["detail"])
+    assert "columns.nope" in errors and "app.ghost not found" in errors
+    assert "use_instead: app.events_v2" in errors  # pre-existing problems are reported too
+    assert client.post("/api/annotations/c1/app/nope/proposals",
+                       json={"patch": {}, "rationale": "x"}).status_code == 404
+    assert _branches(remote) == ["main"]
+
+
+def test_github_pr_reuses_open_pr(monkeypatch):
+    assert gitrepo._github_repo("https://github.com/acme/ann.git") == "acme/ann"
+    assert gitrepo._github_repo("https://gitlab.example.com/acme/ann.git") is None
+    calls = []
+
+    def fake_api(method, path, token, body=None):
+        calls.append((method, path))
+        if method == "POST" and path.endswith("/pulls"):
+            raise gitrepo.GitError("GitHub API POST /repos/acme/ann/pulls failed: HTTP 422 already exists")
+        if method == "GET":
+            return [{"number": 7, "html_url": "https://github.com/acme/ann/pull/7"}]
+        raise gitrepo.GitError("HTTP 403 labels")  # labeling is best effort
+
+    monkeypatch.setattr(gitrepo, "_github_api", fake_api)
+    assert gitrepo._github_pr("acme/ann", "t", "ohmydb/drift", "main", "title", "body") == \
+        "https://github.com/acme/ann/pull/7"
+    assert calls[1] == ("GET", "/repos/acme/ann/pulls?state=open&head=acme%3Aohmydb/drift")
+
+
+def test_proposals_off_or_unauthorized(tmp_path):
+    url, _ = _catalog(tmp_path)
+    path, body = "/api/annotations/c1/app/users/proposals", {"patch": {}, "rationale": "x"}
+    off = _cfg(url, "file:///nowhere")
+    assert TestClient(create_app(off)).post(path, json=body).status_code in (404, 405)
+
+    async def tools(cfg):
+        async with Client(create_mcp(cfg)) as client:
+            return {t.name for t in await client.list_tools()}
+
+    assert "propose_annotation" not in asyncio.run(tools(off))
+    on = _cfg(url, "file:///nowhere", proposals=True)
+    assert "propose_annotation" in asyncio.run(tools(on))
+    on.auth_token = "s3cr3t"
+    assert TestClient(create_app(on)).post(path, json=body).status_code == 401
+
+
+@needs_git
+def test_drift_mr_lifecycle(tmp_path, remote):
+    url, factory = _catalog(tmp_path)
+    with factory() as s:  # c2 gains a table no annotation file covers
+        sync_cluster(s, "c2", [
+            Entity(cluster="c2", database="app", name="events", kind=EntityKind.TABLE, columns=[Column("ts", "DateTime")]),
+            Entity(cluster="c2", database="app", name="sessions", kind=EntityKind.TABLE,
+                   columns=[Column("sid", "UUID"), Column("weird col", "String")]),
+        ], [])
+    cfg = _cfg(url, f"file://{remote}", drift_mr=True)
+
+    drift = sync_annotations(cfg, factory)["drift"]
+    assert drift["status"] == "pushed" and drift["tables"] == 1
+    stub = _git("show", "ohmydb/drift:app/sessions.yaml", cwd=remote)
+    assert stub == render_stub("app", "sessions", ["sid", "weird col"]) and '"weird col"' in stub
+    _, errors = load_tree(_tree(tmp_path / "check", {"app/sessions.yaml": stub}))
+    assert errors == []
+
+    assert sync_annotations(cfg, factory)["drift"]["status"] == "unchanged"  # nothing new: no push
+
+    work = tmp_path / "human"
+    _git("clone", "--quiet", "--branch", "ohmydb/drift", f"file://{remote}", str(work))
+    (work / "app/sessions.yaml").write_text("description: Web sessions\n")
+    _git("-c", "user.name=h", "-c", "user.email=human@example.com", "commit", "-qam", "fill", cwd=work)
+    _git("push", "--quiet", "origin", "ohmydb/drift", cwd=work)
+    assert sync_annotations(cfg, factory)["drift"]["status"] == "skipped"

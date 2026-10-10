@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.annotations.service import format_result, poll_forever, sync_annotations
+from app.annotations.service import ProposalError, format_result, poll_forever, propose, sync_annotations
 from app.config import AppConfig
 from app.core.sync import run_sync
 from app.mcp import create_mcp
@@ -47,6 +47,11 @@ class LabelBody(BaseModel):
     value: str = ""
 
 
+class ProposalBody(BaseModel):
+    patch: dict
+    rationale: str
+
+
 def create_app(cfg: AppConfig) -> FastAPI:
     factory = make_session_factory(cfg.storage_url)
     ann = cfg.annotations
@@ -72,11 +77,12 @@ def create_app(cfg: AppConfig) -> FastAPI:
     api = APIRouter(prefix="/api")
 
     def require_token(authorization: str | None = Header(default=None)) -> None:
-        """Guards mutating routes only (POST /sync, PUT/DELETE /labels) — a
-        dependency, not global middleware, so reads stay open even when a
-        token is configured. No-op (auth off) when cfg.auth_token is unset,
-        which is the default — this is opt-in for deployments exposed past
-        localhost, not a requirement for local dev."""
+        """Guards mutating routes only (POST /sync, PUT/DELETE /labels, POST
+        annotation proposals) — a dependency, not global middleware, so
+        reads stay open even when a token is configured. No-op (auth off)
+        when cfg.auth_token is unset, which is the default — this is opt-in
+        for deployments exposed past localhost, not a requirement for local
+        dev."""
         if cfg.auth_token is None:
             return
         if authorization != f"Bearer {cfg.auth_token}":
@@ -164,6 +170,16 @@ def create_app(cfg: AppConfig) -> FastAPI:
             except Exception as e:
                 log.warning("annotations pull failed: %s", e)
         return results
+
+    if ann.enabled and ann.proposals:
+
+        @api.post("/annotations/{cluster}/{database}/{name}/proposals", dependencies=[Depends(require_token)])
+        def propose_annotation(cluster: str, database: str, name: str, body: ProposalBody) -> dict:
+            """HTTP twin of MCP propose_annotation: merge patch -> one MR/PR."""
+            try:
+                return propose(cfg, factory, cluster, database, name, body.patch, body.rationale, "HTTP")
+            except ProposalError as e:
+                raise HTTPException(status_code=e.status, detail=e.errors)
 
     app.include_router(api)
 

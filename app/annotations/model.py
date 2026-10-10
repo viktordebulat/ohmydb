@@ -10,6 +10,8 @@ cheap later. Models forbid unknown keys: a typo'd key must fail, not be
 silently dropped (same lesson as label_rules in docs/LEARNINGS.md).
 """
 
+import io
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,7 +19,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.error import YAMLError
+from ruamel.yaml.scalarstring import LiteralScalarString
 
 SUMMARY_MAX = 200
 
@@ -140,13 +144,16 @@ def _read(path: Path) -> dict:
     return raw
 
 
+def format_errors(e: ValidationError) -> list[str]:
+    """`loc: msg` per error, loc dotted (`columns.ts.description`)."""
+    return [f"{'.'.join(str(p) for p in err['loc']) or '(root)'}: {err['msg']}" for err in e.errors()]
+
+
 def _parse(path: Path, rel: str, model: type[BaseModel], errors: list[str]) -> dict | None:
     try:
         return normalize(model.model_validate(_read(path)))
     except ValidationError as e:
-        for err in e.errors():
-            loc = ".".join(str(p) for p in err["loc"]) or "(root)"
-            errors.append(f"{rel}: {loc}: {err['msg']}")
+        errors += [f"{rel}: {msg}" for msg in format_errors(e)]
     except (YAMLError, ValueError) as e:
         errors.append(f"{rel}: {e}")
     return None
@@ -200,3 +207,75 @@ def load_tree(root: Path, exclude: frozenset[str] = frozenset()) -> tuple[Tree, 
                 if doc is not None:
                     tree.tables[(db, f.stem)] = (doc, rel)
     return tree, errors
+
+
+# --- write side (M24): round-trip edits keep comments, order and quoting ---
+
+def _rt_yaml() -> YAML:
+    y = YAML(typ="rt", pure=True)
+    y.preserve_quotes = True
+    y.width = 4096
+    y.indent(mapping=2, sequence=4, offset=2)  # house style, see docs/ANNOTATIONS.md
+    return y
+
+
+def load_rt(text: str) -> CommentedMap:
+    doc = _rt_yaml().load(text)
+    if doc is None:
+        return CommentedMap()
+    if not isinstance(doc, CommentedMap):
+        raise ValueError("expected a mapping at the top level")
+    return doc
+
+
+def dump_rt(doc: CommentedMap) -> str:
+    buf = io.StringIO()
+    _rt_yaml().dump(doc, buf)
+    return buf.getvalue()
+
+
+def _to_rt(value):
+    """Plain JSON value -> ruamel nodes; multi-line strings become `|` blocks."""
+    if isinstance(value, dict):
+        return CommentedMap((k, _to_rt(v)) for k, v in value.items())
+    if isinstance(value, list):
+        return CommentedSeq(_to_rt(v) for v in value)
+    if isinstance(value, str) and "\n" in value:
+        return LiteralScalarString(value)
+    return value
+
+
+def merge_patch(target, patch):
+    """RFC 7386 JSON merge patch applied in place to a ruamel round-trip map:
+    nested dicts merge, anything else (lists included) replaces, null deletes.
+    Untouched keys keep their comments and formatting."""
+    if not isinstance(patch, dict):
+        return _to_rt(patch)
+    if not isinstance(target, dict):
+        target = CommentedMap()
+    for k, v in patch.items():
+        if v is None:
+            target.pop(k, None)
+        else:
+            target[k] = merge_patch(target.get(k), v)
+    return target
+
+
+def _key(name: str) -> str:
+    # JSON strings are valid YAML double-quoted scalars.
+    return name if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", name) else json.dumps(name)
+
+
+def render_stub(database: str, name: str, columns: list[str]) -> str:
+    """Empty table file for a drift MR. Empty values are dropped on load, so
+    an unfilled stub reads as unannotated."""
+    lines = [
+        f"# {database}.{name}: stub added by ohmydb (schema drift). Fill in what you",
+        "# know, leave the rest empty. Format: docs/ANNOTATIONS.md in the ohmydb repo.",
+        'description: ""',
+        'grain: ""',
+    ]
+    if columns:
+        lines.append("columns:")
+        lines += [f'  {_key(c)}: {{description: ""}}' for c in columns]
+    return "\n".join(lines) + "\n"

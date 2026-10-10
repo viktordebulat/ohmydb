@@ -11,8 +11,9 @@ repo**: changes go through MR review, with history and CODEOWNERS. ohmydb
 pulls the repo into its catalog and serves it over MCP, the HTTP API and the
 frontend. Everything is off unless `annotations.enabled` is true.
 
-Write path (agent proposals as MRs, drift stubs for new tables) is milestone
-M24 and not shipped yet.
+ohmydb can also write back, only through merge/pull requests a human
+reviews: agent proposals and stub files for new tables. See
+[Write path](#write-path).
 
 ## Repo layout
 
@@ -66,7 +67,7 @@ a file that is empty after that (an unfilled stub) counts as unannotated.
 
 `_global.yaml`: `version: 1` (optional; any other value aborts the pull),
 `query_hints: [str]`, `ignore: [regex]` (`re.search` against `db.table`; such
-tables never get drift stubs — M24). `_database.yaml`: `description`,
+tables never get drift stubs). `_database.yaml`: `description`,
 `query_hints`.
 
 ### YAML pitfalls
@@ -98,12 +99,16 @@ annotations:
   path: ""                  # shared root inside the repo/dir
   cluster_paths: {}         # {cluster: root}, falls back to `path` per file
   pull_interval: 300        # serve only, seconds; 0 = no polling
+  proposals: false          # MCP propose_annotation + HTTP proposals route
+  drift_mr: false           # stub MR for new tables after each sync
+  author: "ohmydb <ohmydb@noreply.invalid>"   # bot commit identity
 ```
 
 `repo`: `https://` or `file://` = git remote; no `://` = local directory, read
 as-is (handy for local dev; `config.example.yaml` points at
 `seed/annotations`). Any other scheme, credentials in the URL, an unknown
-`cluster_paths` cluster, or a negative `pull_interval` fail config load.
+`cluster_paths` cluster, a negative `pull_interval`, `proposals`/`drift_mr`
+with a local dir, or an `author` that isn't `Name <email>` fail config load.
 
 Token: env `OHMYDB_ANNOTATIONS_TOKEN` only (empty = unset). A `token:` key in
 the config is rejected.
@@ -138,6 +143,155 @@ catalog copy untouched.
 
 With the flag off, every payload is exactly the pre-feature shape.
 
+## Write path
+
+Writes never touch the catalog or `ref` directly. Each one is a commit by
+`author` on its own branch, pushed, then opened for review against `ref`
+with label `ohmydb`:
+
+- **GitLab** (any host that isn't github.com): the push carries
+  [push options](https://docs.gitlab.com/user/project/push_options/) that
+  open the merge request and remove the source branch on merge. No API call.
+- **GitHub** (`https://github.com/...` only, not GitHub Enterprise): one REST
+  call after the push opens the pull request, or reuses the open one for
+  the same branch. Enable *Automatically delete head branches* in the repo
+  settings to clean up merged branches. Labeling is best effort.
+
+Nothing changes for readers until a human merges and the next pull runs.
+"MR" below means either.
+
+### Proposals (`proposals: true`)
+
+MCP `propose_annotation(cluster, database, name, patch, rationale)` and
+`POST /api/annotations/{cluster}/{database}/{name}/proposals` with body
+`{"patch": {...}, "rationale": "..."}`. Both exist only while the flag is on.
+The route sits behind `OHMYDB_AUTH_TOKEN` like the other writes; MCP has no
+app-level auth (guard `/mcp` at the proxy).
+
+1. The entity must exist in the catalog (`404` otherwise), `rationale` must
+   be non-empty, and the names must be usable as a file path.
+2. A fresh clone; the target is the file in effect for that cluster: its
+   `cluster_paths` override if one exists, else the shared file, else a new
+   shared file.
+3. `patch` is an [RFC 7386](https://www.rfc-editor.org/rfc/rfc7386) JSON
+   merge patch: maps merge key by key, lists (hints, relationships,
+   examples) are replaced whole, `null` deletes. The file is edited
+   round-trip, so comments, key order and quoting of untouched lines stay
+   byte-identical.
+4. The result must fit the schema, and every column, relationship target,
+   relationship column and `use_instead` must exist in that cluster. All
+   problems come back at once (`422` over HTTP), including ones already in
+   the file, so the caller can fix the patch and retry.
+5. Unchanged text returns `{"status": "unchanged"}`. Otherwise one MR per
+   proposal on `ohmydb/propose/<db>.<table>-<UTC time>-<rand>`; commit
+   subject `annotations(<db>.<table>): <rationale line 1>`.
+
+Returns `{status, branch, merge_request, path}`. `merge_request` is the URL
+of the MR/PR (`null` if GitLab printed none on push).
+
+#### Request examples
+
+Against the seed schema (`task up`), with `OHMYDB_AUTH_TOKEN` set:
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/annotations/local/analytics/events_hourly/proposals \
+  -H "Authorization: Bearer $OHMYDB_AUTH_TOKEN" -H 'Content-Type: application/json' \
+  -d @- <<'JSON'
+{
+  "patch": {
+    "owner": "team-analytics",
+    "query_hints": [
+      "SummingMergeTree, rows may not be collapsed yet. Always use sum(cnt) with GROUP BY, never read cnt raw.",
+      "Fed only by analytics.events_hourly_mv: rows exist from the MV creation time on, no backfill."
+    ],
+    "relationships": [
+      {"to": "app.events", "from_columns": ["event_type"], "to_columns": ["event_type"],
+       "cardinality": "one_to_many", "description": "Drill down from an hourly bucket to raw events"}
+    ]
+  },
+  "rationale": "Hourly table has no backfill\nChecked the MV DDL: plain TO-table MV, no POPULATE, so history starts at MV creation."
+}
+JSON
+```
+
+`200`:
+
+```json
+{"status": "proposed",
+ "branch": "ohmydb/propose/analytics.events_hourly-20261010T171957Z-81ca",
+ "merge_request": "https://github.com/acme/schema-annotations/pull/4",
+ "path": "analytics/events_hourly.yaml"}
+```
+
+The MR/PR adds `owner`, the second hint and the relationship. The first
+hint was sent back unchanged (lists are replaced whole), so it stays as is.
+Every other line of the file is untouched.
+
+Patch recipes (the `patch` value only):
+
+```jsonc
+// describe a column, keep everything else
+{"columns": {"cnt": {"description": "Events in the hour; partial until merged"}}}
+// enum meanings (map form; a plain list of values works too)
+{"columns": {"event_type": {"values": {"click": "element click", "view": "page view"}}}}
+// deprecate in favor of another table (must exist in the cluster)
+{"status": "deprecated", "use_instead": "analytics.daily_counts"}
+// add a verified query: send the current examples too, or they are dropped
+{"examples": [{"question": "Events per type yesterday", "sql": "SELECT event_type, sum(cnt) FROM ..."}]}
+// delete a key / a column's annotation
+{"owner": null, "columns": {"old_col": null}}
+```
+
+Errors (`detail` lists every problem, so fix them all and retry):
+
+```text
+401  {"detail": "missing or invalid bearer token"}
+404  {"detail": ["entity not found: local/analytics/nope"]}
+422  {"detail": ["rationale: required — say what you verified and how"]}
+422  {"detail": ["columns.total: analytics.events_hourly has no such column",
+                 "relationships.0.to: analytics.ghost not found in cluster local"]}
+422  {"detail": ["status: Input should be '', 'active' or 'deprecated'"]}
+```
+
+The rationale and path checks run first, so their error comes back alone;
+schema and catalog problems come back together. `{"status": "unchanged",
+"path": ...}` (`200`, no MR) means the patch didn't change the file.
+
+MCP takes the same arguments:
+
+```json
+{"tool": "propose_annotation",
+ "arguments": {"cluster": "local", "database": "app", "name": "users",
+               "patch": {"query_hints": ["Soft-deleted rows have deleted_at set."]},
+               "rationale": "Read the users service code: deletes set deleted_at, rows stay"}}
+```
+
+A rejected MCP call is a tool error whose text holds the same messages, one
+per line.
+
+### Drift MR (`drift_mr: true`)
+
+After every schema sync (`ohmydb sync`, `POST /api/sync`; not the poller,
+not `annotations pull`), from the same clone as the pull:
+
+- A stub is needed for each catalog table (any kind but `external`) with no
+  file in its cluster's override root or the shared root, not matched by
+  `ignore` in the shared `_global.yaml`. Files are checked on disk, so a
+  file with errors still counts as present. Names starting with `.` or `_`
+  are skipped.
+- Stubs go into the shared root: a header comment, `description: ""`,
+  `grain: ""` and every column with `description: ""`. An unfilled stub
+  reads as unannotated.
+- One rolling branch, `ohmydb/drift`, rebuilt from `ref` each time and
+  force-pushed with a lease. No push when its content didn't change. If the
+  branch head was committed by anyone other than `author`, the step is
+  skipped, so human edits on it are never overwritten.
+- The MR description lists the new tables, plus orphan files (table gone)
+  and stale columns as FYI. Those are never edited.
+
+Existing files are never touched: drift only adds files for new tables. A
+drift failure is reported (`drift=failed ...`) and doesn't undo the pull.
+
 ## Annotation repo CI and editors
 
 ```bash
@@ -156,26 +310,50 @@ For VS Code (redhat.vscode-yaml):
 
 ## Git auth and security
 
+### Token scopes
+
+One token, in `OHMYDB_ANNOTATIONS_TOKEN`, for everything. Give it the least
+the enabled features need:
+
+| Host | Features on | Token | Scopes / permissions |
+|---|---|---|---|
+| GitLab | reads only | Project access token (Settings → Access tokens) | Role **Reporter**, scope **`read_repository`** |
+| GitLab | `proposals` / `drift_mr` | Project access token | Role **Developer**, scope **`write_repository`**. No `api` scope: the push itself opens the MR (push options) |
+| GitHub | reads only | Fine-grained PAT, *Only select repositories* → the annotation repo | **Contents: Read-only** (Metadata: Read-only is added automatically) |
+| GitHub | `proposals` / `drift_mr` | Fine-grained PAT, same repo selection | **Contents: Read and write** + **Pull requests: Read and write**. No Issues permission needed (the `ohmydb` label still applies) |
+
+- Verified: GitHub reads and writes, private repo, 2026-10-10. GitLab reads
+  and writes follow GitLab's docs but haven't been run against a real
+  instance yet.
+- Avoid broader tokens: a GitLab personal token or `api` scope, or a GitHub
+  classic PAT (`repo` covers every private repo the user can see).
+- On GitHub the token goes to git as Basic auth (`oauth2:<token>`; GitHub
+  ignores the user name) and to `api.github.com` as `Bearer`, for the PR
+  call only.
+- **Protect `ref` for any write token**, or the bot can push to it directly.
+  GitLab: protected branch with no push for Developers, approvals required,
+  CODEOWNERS per db dir. GitHub: a branch ruleset on `ref` (require a pull
+  request + approval, block force pushes, CODEOWNERS review). Rulesets and
+  branch protection on a *private* GitHub repo need Pro/Team.
+- If GitLab push rules check the commit email, set `author` to match.
+
+### Transport and other notes
+
 - **The token never appears in a URL, argv, on disk, or in logs.** git gets
   it as an HTTP header via env: `GIT_TERMINAL_PROMPT=0`,
   `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=http.<scheme://host[:port]>/.extraHeader`
   (scoped to the repo host), `GIT_CONFIG_VALUE_0=Authorization: Basic
   base64("oauth2:"+token)`. git stderr is therefore safe to show in errors.
   Needs `git >= 2.31`. Internal CA: `GIT_SSL_CAINFO`. Proxy: `HTTPS_PROXY`.
-- **GitLab, read-only:** project access token, role Reporter, scope
-  `read_repository`.
-- **GitHub, read-only (verified):** fine-grained PAT, *Only select
-  repositories* → the annotation repo, Repository permissions → Contents:
-  Read-only. GitHub ignores the `oauth2` username. Reads work with any git
-  host that accepts HTTP basic auth with a token; writes (M24) need GitLab.
 - A rejected or missing token fails with git's own message plus a hint to
   check `OHMYDB_ANNOTATIONS_TOKEN`.
 - **Repo placement:** a dedicated repo gives least privilege. A subdir of
   the migrations repo (set `path`) lets schema and annotations change in one
-  MR, but a write-enabled bot (M24) then has push rights there.
+  MR, but a write-enabled bot then has push rights there.
 - **Prompt injection:** annotation text is served verbatim to LLM agents.
-  Review-gated `main` is the control; also keep the strict schema and the
-  `validate` CI. The frontend escapes everything.
+  Review-gated `main` is the control; proposals are agent-written text, so
+  review them like code. Also keep the strict schema, the catalog checks on
+  proposals and the `validate` CI. The frontend escapes everything.
 
 ## Ossie mapping (for a future exporter)
 

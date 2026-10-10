@@ -28,7 +28,11 @@ graph, and serves them over HTTP API and MCP for AI agents.
    (`annotations/model.py`) and replaces the `annotations` table via
    `store/repo.py: replace_annotations()`. Triggered after every sync and by
    `serve`'s background poller; reads join it in `store/queries.py`
-   (`with_annotations=`).
+   (`with_annotations=`). Writes never touch the catalog: with `drift_mr`,
+   `sync_annotations()` pushes stub files for unannotated tables to a
+   rolling `ohmydb/drift` MR (GitLab) / PR (GitHub); with `proposals`, `propose()` (MCP
+   tool / HTTP route) merge-patches one table file and opens an MR. A
+   human merge lands it, and the next pull picks it up.
 
 ## Modules
 
@@ -36,13 +40,13 @@ graph, and serves them over HTTP API and MCP for AI agents.
 |---|---|---|---|
 | `app/core` | DB-agnostic model + sync orchestration | `Entity`, `Edge`, `EntityKind`, `EdgeKind`, `run_sync()`, `apply_label_rules()` | `app/adapters`, `app/store` |
 | `app/adapters` | DB-specific introspection; ClickHouse is the only impl | `Introspector` protocol, `build_introspector()`, ClickHouse parsing | `app/core` |
-| `app/store` | Persistence: SQLAlchemy models, upsert logic, read queries, schema migrations | `EntityRow`/`EdgeRow`/`LabelRow`/`AnnotationRow`, `sync_cluster()`, `sync_auto_labels()`, `replace_annotations()`, `graph_payload()`, `list_entities()`, `get_entity()`, `get_relations()`, `run_migrations()` | `app/core` |
-| `app/annotations` | Repo-backed annotation layer (flag-gated): YAML format + tree loader, git CLI wrapper (the only git-aware code), pull/poll orchestration. DB-agnostic | `TableAnnotation`, `load_tree()`, `gitrepo.clone()/ls_remote()`, `service.pull()/poll_forever()/sync_annotations()` | `app/config`, `app/store` |
+| `app/store` | Persistence: SQLAlchemy models, upsert logic, read queries, schema migrations | `EntityRow`/`EdgeRow`/`LabelRow`/`AnnotationRow`, `sync_cluster()`, `sync_auto_labels()`, `replace_annotations()`, `graph_payload()`, `list_entities()`, `get_entity()`, `get_relations()`, `catalog_columns()`, `run_migrations()` | `app/core` |
+| `app/annotations` | Repo-backed annotation layer (flag-gated): YAML format + tree loader, round-trip merge patch + drift stubs, git CLI wrapper (the only git/GitLab/GitHub-aware code), pull/poll orchestration, write path (proposal MRs, drift MR). DB-agnostic | `TableAnnotation`, `load_tree()`, `merge_patch()`, `render_stub()`, `gitrepo.clone()/commit()/publish()`, `service.pull()/poll_forever()/sync_annotations()/propose()` | `app/config`, `app/store` |
 | `app/migrations` | Alembic migration scripts, shipped inside the package (not repo-root `alembic/`) so they resolve from a non-editable install too | `env.py`, `versions/*.py` | `app/store` |
 | `app/config.py` | Load `config.yaml` → typed config | `load_config()`, `AppConfig` | — |
 | `app/cli.py` | `ohmydb sync\|serve\|mcp\|annotations` entry point | `main()` | `app/config`, `app/core`, `app/api`, `app/mcp`, `app/annotations` |
-| `app/api.py` | FastAPI HTTP surface (routes under `/api`); mounts MCP at `/mcp`; serves the static frontend (`app/web/`) at `/`; runs the annotation poller in its lifespan | `create_app()` | `app/config`, `app/core`, `app/store`, `app/mcp`, `app/annotations` |
-| `app/mcp.py` | fastmcp server (stdio or mounted over HTTP) | `create_mcp()` | `app/config`, `app/store` |
+| `app/api.py` | FastAPI HTTP surface (routes under `/api`); mounts MCP at `/mcp`; serves the static frontend (`app/web/`) at `/`; runs the annotation poller in its lifespan; annotation proposals route (when enabled) | `create_app()` | `app/config`, `app/core`, `app/store`, `app/mcp`, `app/annotations` |
+| `app/mcp.py` | fastmcp server (stdio or mounted over HTTP); `propose_annotation` tool when annotation proposals are on | `create_mcp()` | `app/config`, `app/store`, `app/annotations` |
 
 ## Layering rule
 
@@ -65,7 +69,7 @@ else must stay database-agnostic (see AGENTS.md rule).
 | Add an optional filter to a GET endpoint/tool | optional kwarg (default `None`/`False`) on the `app/store/queries.py` function, passthrough query param in `app/api.py` and/or arg in `app/mcp.py` — keep filter logic in queries.py only, so it stays DB-agnostic and shared |
 | Change sync/upsert behavior | `app/store/repo.py` |
 | Add/change config fields | `app/config.py` |
-| Change the annotation format or how it's served | `app/annotations/model.py` (+ `docs/ANNOTATIONS.md`, `seed/annotations/`); read shape in `app/store/queries.py`; frontend `app/web/app.js: showSchema` |
+| Change the annotation format or how it's served | `app/annotations/model.py` (+ `docs/ANNOTATIONS.md`, `seed/annotations/`); read shape in `app/store/queries.py`; frontend `app/web/app.js: showSchema`; write path (proposals, drift stubs) in `app/annotations/service.py` |
 
 ## Testing
 

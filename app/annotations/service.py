@@ -1,18 +1,38 @@
 """Annotation orchestration: pull the repo into the catalog (store), poll it
-for changes while serving. Entry points call this; it calls app/store and
-never app/adapters."""
+for changes while serving, and (M24) write back through merge/pull requests
+(GitLab or GitHub) — agent proposals and schema-drift stubs. Entry points call this; it calls
+app/store and never app/adapters."""
 
 import asyncio
 import hashlib
 import logging
+import re
+import secrets
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from email.utils import parseaddr
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 
+from pydantic import ValidationError
+from ruamel.yaml.error import YAMLError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.annotations import gitrepo
-from app.annotations.model import Tree, load_tree, summary_of
+from app.annotations.model import (
+    TableAnnotation,
+    Tree,
+    dump_rt,
+    format_errors,
+    load_rt,
+    load_tree,
+    merge_patch,
+    render_stub,
+    summary_of,
+)
 from app.config import AnnotationsConfig, AppConfig
+from app.store.queries import catalog_columns
 from app.store.repo import replace_annotations
 
 log = logging.getLogger(__name__)
@@ -91,34 +111,55 @@ def _rows(cfg: AppConfig, trees: dict[str, Tree]) -> list[dict]:
     return rows
 
 
+@contextmanager
+def _checkout(a: AnnotationsConfig) -> Iterator[tuple[Path, str]]:
+    """(working tree, version). A git remote gets a fresh shallow clone into a
+    temp dir each time: no persistent cache dir, nothing to lock."""
+    if a.is_local:
+        yield Path(a.repo), _dir_hash(Path(a.repo))
+        return
+    with TemporaryDirectory(prefix="ohmydb-annotations-") as tmp:
+        yield Path(tmp), gitrepo.clone(a.repo, a.ref, Path(tmp), a.token)
+
+
+def _store(cfg: AppConfig, factory: sessionmaker[Session], workdir: Path, sha: str) -> tuple[dict, dict[str, Tree]]:
+    trees, errors = _load_trees(cfg.annotations, workdir)
+    with factory() as s:
+        replace_annotations(s, _rows(cfg, trees), sha)
+    files = sum(len(t.tables) + len(t.databases) + bool(t.global_) for t in trees.values())
+    return {"sha": sha, "files": files, "errors": errors}, trees
+
+
 def pull(cfg: AppConfig, factory: sessionmaker[Session]) -> dict:
     """Fetch + parse the annotation repo and replace the catalog copy.
     Per-file errors skip that file and are returned; a fatal error (clone
     failure, missing root, unsupported version) raises before anything is
     written, so the last good copy stays. Returns {sha, files, errors}."""
-    a = cfg.annotations
-    if a.is_local:
-        sha = _dir_hash(Path(a.repo))
-        trees, errors = _load_trees(a, Path(a.repo))
-    else:
-        # Fresh shallow clone each time: no persistent cache dir, nothing to lock.
-        with TemporaryDirectory(prefix="ohmydb-annotations-") as tmp:
-            sha = gitrepo.clone(a.repo, a.ref, Path(tmp), a.token)
-            trees, errors = _load_trees(a, Path(tmp))
-    rows = _rows(cfg, trees)
-    with factory() as s:
-        replace_annotations(s, rows, sha)
-    files = sum(len(t.tables) + len(t.databases) + bool(t.global_) for t in trees.values())
-    return {"sha": sha, "files": files, "errors": errors}
+    with _checkout(cfg.annotations) as (workdir, sha):
+        return _store(cfg, factory, workdir, sha)[0]
 
 
 def sync_annotations(cfg: AppConfig, factory: sessionmaker[Session]) -> dict:
-    """Post-sync annotation step (`ohmydb sync`, POST /api/sync). M23: pull only."""
-    return pull(cfg, factory)
+    """Post-sync annotation step (`ohmydb sync`, POST /api/sync): pull, then
+    with `drift_mr` the drift MR from the same clone. A drift failure lands
+    in result["drift"] — the pull already succeeded and stays."""
+    a = cfg.annotations
+    with _checkout(a) as (workdir, sha):
+        result, trees = _store(cfg, factory, workdir, sha)
+        if a.drift_mr:
+            try:
+                result["drift"] = _drift(cfg, factory, workdir, trees)
+            except Exception as e:
+                result["drift"] = {"status": "failed", "detail": str(e)}
+    return result
 
 
 def format_result(result: dict) -> str:
-    return f"annotations: sha={result['sha'][:12]} files={result['files']} errors={len(result['errors'])}"
+    line = f"annotations: sha={result['sha'][:12]} files={result['files']} errors={len(result['errors'])}"
+    if d := result.get("drift"):
+        line += f" drift={d['status']}"
+        line += "".join(f" {d[k]}" for k in ("merge_request", "detail") if d.get(k))
+    return line
 
 
 async def poll_forever(cfg: AppConfig, factory: sessionmaker[Session]) -> None:
@@ -138,3 +179,178 @@ async def poll_forever(cfg: AppConfig, factory: sessionmaker[Session]) -> None:
         except Exception as e:
             log.warning("annotations poll failed: %s", e)
         await asyncio.sleep(cfg.annotations.pull_interval)
+
+
+# --- write path (M24) ---
+
+DRIFT_BRANCH = "ohmydb/drift"
+_BAD_NAME_CHARS = re.compile(r"[/\\\0]")
+
+
+def _safe_name(name: str) -> bool:
+    """Usable as a path segment of <db>/<table>.yaml. A leading "." or "_"
+    would make load_tree skip or reject the file, so it's refused too."""
+    return bool(name) and not _BAD_NAME_CHARS.search(name) and name[0] not in "._"
+
+
+def _root(path: str) -> str:
+    return str(PurePosixPath(path))
+
+
+def _fyi(cfg: AppConfig, trees: dict[str, Tree], catalog: dict) -> list[str]:
+    """Drift MR description extras: annotation files whose table is gone and
+    annotated columns that no longer exist. Reported only, never edited."""
+    a = cfg.annotations
+    lines = []
+    for root, tree in trees.items():
+        served = [c.name for c in cfg.clusters if root in (_root(a.path), _root(a.cluster_paths.get(c.name, a.path)))]
+        for (db, name), (doc, path) in sorted(tree.tables.items()):
+            hits = [catalog[(c, db, name)] for c in served if catalog.get((c, db, name), ("external",))[0] != "external"]
+            if not hits:
+                lines.append(f"orphan file (table not in the catalog): {path}")
+            elif stale := sorted(set(doc.get("columns", {})) - {col for _, cols in hits for col in cols}):
+                lines.append(f"stale columns in {path}: {', '.join(stale)}")
+    return lines
+
+
+def _drift(cfg: AppConfig, factory: sessionmaker[Session], workdir: Path, trees: dict[str, Tree]) -> dict:
+    """Rolling MR on DRIFT_BRANCH adding stub files (shared root) for catalog
+    tables that have no annotation file anywhere — new tables only, existing
+    files are never touched. Skipped when a human pushed to the branch."""
+    a = cfg.annotations
+    with factory() as s:
+        catalog = catalog_columns(s)
+    shared = trees[_root(a.path)]
+    if shared.global_ is None and (workdir / a.path / "_global.yaml").is_file():
+        return {"status": "skipped", "detail": "_global.yaml has errors (its ignore list is unknown)"}
+    ignore = [re.compile(p) for p in (shared.global_ or ({}, ""))[0].get("ignore", [])]
+
+    configured = {c.name for c in cfg.clusters}
+    stubs: dict[tuple[str, str], list[str]] = {}
+    for (cluster, db, name), (kind, columns) in sorted(catalog.items()):
+        if cluster not in configured or kind == "external" or not (_safe_name(db) and _safe_name(name)):
+            continue
+        if any(p.search(f"{db}.{name}") for p in ignore):
+            continue
+        # On disk, not the parsed tree: a file with errors still exists and
+        # must not be overwritten by a stub.
+        roots = {a.path, a.cluster_paths.get(cluster, a.path)}
+        if any((workdir / r / db / f"{name}.yaml").exists() for r in roots):
+            continue
+        stubs.setdefault((db, name), columns)
+    if not stubs:
+        return {"status": "none"}
+
+    seen = gitrepo.remote_sha(a.repo, DRIFT_BRANCH, a.token)
+    if seen is not None:
+        gitrepo.fetch(workdir, a.repo, DRIFT_BRANCH, a.token)
+        if gitrepo.head_author_email(workdir, "FETCH_HEAD") != parseaddr(a.author)[1]:
+            return {"status": "skipped", "detail": f"{DRIFT_BRANCH} has commits by someone else"}
+
+    for (db, name), columns in stubs.items():
+        path = workdir / a.path / db / f"{name}.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(render_stub(db, name, columns))
+    tables = [f"{db}.{name}" for db, name in stubs]
+    gitrepo.commit(workdir, f"annotations: stubs for {len(tables)} new table(s)\n\n" + "\n".join(tables), a.author)
+    if seen is not None and gitrepo.rev_parse(workdir, "FETCH_HEAD^{tree}") == gitrepo.rev_parse(workdir, "HEAD^{tree}"):
+        return {"status": "unchanged", "tables": len(tables)}
+
+    fyi = _fyi(cfg, trees, catalog)
+    description = "\n".join([
+        "Stub annotation files for tables that have none yet. Fill in what you know, then merge "
+        "(or add the table to `ignore` in _global.yaml).", "",
+        *(f"- {t}" for t in tables),
+        *(["", "FYI, not changed by this MR:", *(f"- {line}" for line in fyi)] if fyi else []),
+    ])
+    title = f"ohmydb: annotation stubs for {len(tables)} table{'s' if len(tables) != 1 else ''}"
+    url = gitrepo.publish(workdir, a.repo, DRIFT_BRANCH, seen or "", a.ref, title, description, a.token)
+    return {"status": "pushed", "tables": len(tables), "merge_request": url}
+
+
+class ProposalError(Exception):
+    """Rejected proposal. `status`: 404 unknown entity, 422 invalid input —
+    `errors` lists every problem so an agent can fix the patch and retry."""
+
+    def __init__(self, status: int, errors: list[str]):
+        super().__init__("; ".join(errors))
+        self.status = status
+        self.errors = errors
+
+
+def _check_against_catalog(doc, cluster: str, database: str, name: str, catalog: dict) -> list[str]:
+    """The guard against hallucinated columns and tables: the patched doc
+    must fit the schema and only reference what exists in this cluster."""
+    try:
+        model = TableAnnotation.model_validate(doc)
+    except ValidationError as e:
+        return format_errors(e)
+    columns = set(catalog[(cluster, database, name)][1])
+    errors = [f"columns.{c}: {database}.{name} has no such column" for c in model.columns if c not in columns]
+
+    def target(ref: str) -> tuple[str, list[str]] | None:
+        return catalog.get((cluster, *ref.split(".", 1)))
+
+    for i, r in enumerate(model.relationships):
+        if (t := target(r.to)) is None:
+            errors.append(f"relationships.{i}.to: {r.to} not found in cluster {cluster}")
+            continue
+        errors += [f"relationships.{i}.from_columns: {database}.{name} has no column {c}"
+                   for c in r.from_columns if c not in columns]
+        errors += [f"relationships.{i}.to_columns: {r.to} has no column {c}" for c in r.to_columns if c not in t[1]]
+    if model.use_instead and ("." not in model.use_instead or target(model.use_instead) is None):
+        errors.append(f"use_instead: {model.use_instead} not found in cluster {cluster} (expected db.table)")
+    return errors
+
+
+def propose(cfg: AppConfig, factory: sessionmaker[Session], cluster: str, database: str, name: str,
+            patch: dict, rationale: str, via: str) -> dict:
+    """Apply a JSON merge patch to the table's annotation file (the one in
+    effect for `cluster`: its override file, else the shared one, else a new
+    shared file) and open one MR for it on a unique branch. Nothing changes
+    until a human merges. Raises ProposalError."""
+    a = cfg.annotations
+    with factory() as s:
+        catalog = catalog_columns(s)
+    if catalog.get((cluster, database, name), ("external",))[0] == "external":
+        raise ProposalError(404, [f"entity not found: {cluster}/{database}/{name}"])
+    if not rationale.strip():
+        raise ProposalError(422, ["rationale: required — say what you verified and how"])
+    if not (_safe_name(database) and _safe_name(name)):
+        raise ProposalError(422, [f"{database}.{name}: name can't be used as an annotation file path"])
+
+    rel_in_root = PurePosixPath(database) / f"{name}.yaml"
+    with TemporaryDirectory(prefix="ohmydb-annotations-") as tmp:
+        workdir = Path(tmp)
+        gitrepo.clone(a.repo, a.ref, workdir, a.token)
+        override = a.cluster_paths.get(cluster)
+        if override is not None and (workdir / override / rel_in_root).is_file():
+            rel = str(PurePosixPath(override) / rel_in_root)
+        else:
+            rel = str(PurePosixPath(a.path) / rel_in_root)
+        path = workdir / rel
+        if not path.resolve().is_relative_to(workdir.resolve()):
+            raise ProposalError(422, [f"{rel}: path escapes the repo"])
+
+        current = path.read_text() if path.is_file() else ""
+        try:
+            doc = merge_patch(load_rt(current), patch)
+        except (YAMLError, ValueError) as e:
+            raise ProposalError(422, [f"{rel} (current file): {e}"]) from None
+        if errors := _check_against_catalog(doc, cluster, database, name, catalog):
+            raise ProposalError(422, errors)
+        text = dump_rt(doc) if doc else ""
+        if text == current:
+            return {"status": "unchanged", "path": rel}
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        branch = f"ohmydb/propose/{database}.{name}-{ts}-{secrets.token_hex(2)}"
+        rationale = rationale.strip()
+        gitrepo.commit(workdir, f"annotations({database}.{name}): {rationale.splitlines()[0]}\n\n"
+                                f"{rationale}\n\nvia {via}", a.author)
+        description = f"{rationale}\n\nProposed via {via} for cluster `{cluster}`."
+        url = gitrepo.publish(workdir, a.repo, branch, "", a.ref, f"ohmydb: annotate {database}.{name}", description,
+                              a.token)
+    return {"status": "proposed", "branch": branch, "merge_request": url, "path": rel}

@@ -1,8 +1,9 @@
 # Optional: set OHMYDB_AUTH_TOKEN to require `Authorization: Bearer <token>`
-# on mutating HTTP endpoints (POST /api/sync, PUT/DELETE /api/labels). Reads
-# and MCP stay open regardless. Unset (the default) = no auth — fine for
-# localhost-only dev; set it for anything reachable past that. Env-only, no
-# yaml field, so a token never ends up in a mounted config file.
+# on mutating HTTP endpoints (POST /api/sync, PUT/DELETE /api/labels,
+# annotation proposals). Reads and MCP stay open regardless. Unset (the
+# default) = no auth — fine for localhost-only dev; set it for anything
+# reachable past that. Env-only, no yaml field, so a token never ends up in
+# a mounted config file.
 
 storage:
   # Local debug: sqlite, just a file url.
@@ -41,6 +42,12 @@ annotations:
   # path: ""                  # shared root inside the repo
   # cluster_paths: {}         # {cluster: root} override; missing files fall back to `path`
   # pull_interval: 300
+  # Write back via merge/pull requests only (GitLab, or github.com; needs a git
+  # remote and a write token, see docs/ANNOTATIONS.md; protect `ref` so the
+  # bot can only open MRs/PRs):
+  # proposals: true           # MCP propose_annotation + POST /api/annotations/.../proposals
+  # drift_mr: true            # after sync: rolling MR adding stubs for new tables
+  # author: "ohmydb <ohmydb@noreply.invalid>"   # bot commit identity
 
 # Credential env precedence per cluster (highest wins):
 #   CLICKHOUSE_USER__<KEY> / CLICKHOUSE_PASSWORD__<KEY>   (KEY = cluster name,

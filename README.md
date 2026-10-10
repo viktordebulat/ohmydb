@@ -31,6 +31,7 @@ The catalog is exposed as an MCP server at `/mcp/`:
 | `get_table` | `cluster`, `database`, `name` | One entity in full: columns with types/comments, raw DDL, engine, attrs, labels. With annotations on: `annotation` (description, grain, status/use_instead, owner, query_hints, relationships, examples) and per-column `description`/`values`. |
 | `get_table_relations` | `cluster`, `database`, `name`, `direct` (optional, default `False`) | The entity plus its upstream sources and downstream consumers — transitive by default, or just 1-hop neighbors when `direct=True` (no separate edge list — membership in upstream/downstream already implies direction). |
 | `find_tables` | `query`, `column`, `column_type`, `match`, `kind`, `cluster` (all optional, ≥1 required, ANDed) | Brief matches (identity + kind + labels). `query`: substring of name, database, or label — or exact `key:value` label lookup when it contains a colon. `column`: list of case-insensitive name globs (`*_id`); `match="all"` (default) needs every pattern to hit, `"any"` one. `column_type`: exact type, bound to the same column as each pattern. Adds `matched_columns` when a column filter is given. With annotations on: `query` also matches the summary; `summary`/`status` columns. |
+| `propose_annotation` | `cluster`, `database`, `name`, `patch`, `rationale` | Only with `annotations.proposals` on. JSON merge patch against the table's annotation (maps merge, lists replace, `null` deletes), checked against the catalog, opened as a GitLab MR / GitHub PR for human review → `{status, branch, merge_request, path}`. |
 
 ## HTTP API
 
@@ -48,12 +49,14 @@ All paths below are under `/api`.
 | `PUT` | `/api/labels/{cluster}/{database}/{table}` | Set a label. Body: `{"key": "...", "value": "..."}`. Always marks it `manual` (see below). |
 | `DELETE` | `/api/labels/{cluster}/{database}/{table}/{key}` | Remove a label. |
 | `POST` | `/api/sync` | Re-introspect clusters. Optional `?cluster=<name>`. |
+| `POST` | `/api/annotations/{cluster}/{database}/{name}/proposals` | Only with `annotations.proposals` on; twin of `propose_annotation`. Body: `{"patch": {...}, "rationale": "..."}`. `422` lists every validation problem. |
 
 ### Auth
 
 Off by default — fine for localhost-only dev. Set `OHMYDB_AUTH_TOKEN` (env
-var only, never in `config.yaml`) to require a bearer token on the three
-mutating routes above (`PUT`/`DELETE /api/labels/...`, `POST /api/sync`).
+var only, never in `config.yaml`) to require a bearer token on the
+mutating routes above (`PUT`/`DELETE /api/labels/...`, `POST /api/sync`,
+`POST /api/annotations/.../proposals`).
 Reads (`GET /api/...`) and MCP are never gated by this token, even when
 it's set — separate concern, guard those at the network/proxy layer
 (e.g. Pomerium, above) if they need to be private too.
@@ -82,7 +85,9 @@ node in the map to re-center on it.
 Optional, off by default. Human-curated YAML in a git repo (reviewed in MRs)
 adds what introspection can't know: what a table is, grain, units, enum
 values, join keys, deprecations, query gotchas and verified example queries.
-ohmydb pulls it on every sync and polls it while serving.
+ohmydb pulls it on every sync and polls it while serving. Optionally it
+writes back via merge/pull requests only (GitLab or github.com): agent proposals (`proposals: true`) and
+stub files for new tables (`drift_mr: true`).
 
 ```yaml
 annotations:
@@ -93,7 +98,10 @@ annotations:
 ```
 
 Token for private repos: `OHMYDB_ANNOTATIONS_TOKEN` env only (GitLab: project
-access token, Reporter, `read_repository`); the image ships `git`. CLI:
+access token, Reporter + `read_repository`; for writes Developer +
+`write_repository`. GitHub: fine-grained PAT, Contents, plus Pull requests
+for writes. Protect `ref` so the bot can only open MRs/PRs; details in
+[Token scopes](docs/ANNOTATIONS.md#token-scopes)); the image ships `git`. CLI:
 `ohmydb annotations pull`, `ohmydb annotations validate DIR` (CI for the
 annotation repo), `ohmydb annotations schema` (JSON Schema for editors).
 Format, cluster overrides and security notes:
