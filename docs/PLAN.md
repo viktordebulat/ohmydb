@@ -22,7 +22,7 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
 | Sync trigger | CLI command + POST /sync endpoint (same code path). No scheduler. |
 | Scope | Multi-cluster from day one. Entities namespaced by cluster. |
 | Detail | Structured columns (name/type/comment) + raw DDL + attrs (engine, keys, refreshable). |
-| Annotations | **Decided 2026-10-10.** Repo-backed, flag-gated (`annotations.enabled`, off by default): per-table YAML in a git repo, pulled into the catalog; writes only via GitLab MRs. See "Planned: annotation layer" below. |
+| Annotations | **Decided 2026-10-10.** Repo-backed, flag-gated (`annotations.enabled`, off by default): per-table YAML in a git repo, pulled into the catalog; writes only via GitLab MRs. Shipped as M23/M24; see "Annotation layer decision record" below. |
 
 ## Shipped (milestones)
 
@@ -343,8 +343,8 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   `/api/search` reject a call with no filter (would dump the catalog).
   Known limitation: one `column_type` for all patterns — per-column types
   ("user_id:UInt64 AND ts:DateTime") not expressible; add if asked.
-- **M23 (2026-10-10)**: annotation layer, read path (see Planned section
-  below for the decision record, `docs/ANNOTATIONS.md` for the format). New
+- **M23 (2026-10-10)**: annotation layer, read path (see the decision record
+  below, `docs/ANNOTATIONS.md` for the format). New
   `app/annotations/` package: pydantic models + `load_tree()` (strict keys,
   per-file errors, fatal on missing root / `version != 1`), `gitrepo.py`
   (git CLI, token as `GIT_CONFIG_*` extraHeader, never in URL/argv),
@@ -359,6 +359,52 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   both Docker stages. Deviation from the handoff: an override root nested in
   the shared root (e.g. `clusters/prod` under `""`) is skipped by the shared
   scan, and `validate --exclude` does the same offline.
+
+- **M24 (2026-10-10)**: annotation layer, write path (merge/pull requests
+  only, see `docs/ANNOTATIONS.md#write-path`). `gitrepo.py` gains
+  `commit()`/`publish()` (push with `--force-with-lease`, then GitLab push
+  options or a github.com REST call), `fetch()`, `head_author_email()`,
+  `mr_url()`; `model.py` gains ruamel round-trip
+  `merge_patch()` (RFC 7386, untouched lines stay byte-identical) and
+  `render_stub()`; `store/queries.py: catalog_columns()`. `service.propose()`
+  behind MCP `propose_annotation` and `POST
+  /api/annotations/{cluster}/{database}/{name}/proposals` (both registered
+  only with `proposals: true`; the route is token-gated): patch the file in
+  effect for the cluster, check columns/relationship targets/`use_instead`
+  against the catalog (all errors at once, 422), one MR per proposal on a
+  unique branch. `sync_annotations()` with `drift_mr: true`: rolling
+  `ohmydb/drift` MR adding stubs for tables with no file (disk check, so
+  files with errors aren't overwritten), skipped when the branch head isn't
+  the bot's, no push when unchanged; orphan files / stale columns listed as
+  FYI. `annotations pull` and the poller never run drift. Deviations from
+  the handoff: `author` must parse as `Name <email>` (config load fails
+  otherwise, since drift compares the head author's email with it); names
+  starting with `.`/`_` are never written (load_tree would skip/reject
+  them); drift only considers configured clusters; GitHub PRs (github.com
+  only) added on request — the token doubles as the API Bearer token.
+
+### Annotation layer decision record (M23/M24)
+
+Decided 2026-10-10. Agents composing ClickHouse queries see only names,
+types, DDL, comments and lineage, and guess the rest: grain, units, enum
+values, join keys (ClickHouse has no FKs), dedup/`FINAL` gotchas, deprecated
+tables. Fix: a human-curated annotation layer kept in a git repo (MR review,
+history, CODEOWNERS), pulled into the catalog and served over MCP/API/UI; the
+service can also open MRs against it. Format, setup and security:
+`docs/ANNOTATIONS.md`.
+
+| Topic | Decision |
+|---|---|
+| Source | Git repo is the source of truth; the catalog keeps a materialized copy (new `annotations` table, identity-keyed like labels). Reads never touch git. |
+| Flag | `annotations.enabled` in config, off by default = fully inert. Writes need their own flags (`proposals`, `drift_mr`). Token env-only: `OHMYDB_ANNOTATIONS_TOKEN`. |
+| Format | Own per-table YAML, path = identity: `<db>/<table>.yaml`, plus optional `_global.yaml` and `<db>/_database.yaml`. Holds only what introspection can't know: description (first line = summary), grain, status/use_instead, owner, query_hints, columns (description, values), relationships (from_columns/to_columns), examples (question → SQL). Field names follow Apache Ossie (formerly OSI) where they overlap; Ossie itself not adopted (v0.2 still mutable, one model per file). Strict schema (`extra=forbid`). |
+| Clusters | Shared root `path`; optional `cluster_paths` per cluster, with file-level fallback to the shared root. |
+| Transport | `git` CLI over HTTPS + token (auth header passed via `GIT_CONFIG_*` env, never in URL/argv/disk). Reads work with any git host; writes use GitLab push options (`-o merge_request.create`), so `write_repository` scope suffices, no `api` scope; github.com gets one REST call for the PR (added in M24). No persistent clone. |
+| Refresh | `serve` polls (`git ls-remote` every `pull_interval`, clone only on a new sha); every `sync` also pulls. |
+| Writes | MCP `propose_annotation` + token-gated HTTP proposals route (merge patch, validated against the live catalog, one MR per proposal); rolling `ohmydb/drift` MR after sync adding stub files for unannotated tables only. The bot can't push to protected `main`. |
+| MCP auth | Same as M19: no app-level token on MCP; Pomerium + flag + MR review. |
+| Surfacing | `get_table`/GET entity: full annotation + per-column descriptions. Listings: `summary` + `status`, `q` searches summary. `get_schema_graph`: global/database hints. Frontend schema panel. |
+| Tooling | `ohmydb annotations validate DIR` (annotation repo CI), `ohmydb annotations schema` (JSON Schema for editors), sample tree in `seed/annotations/`. |
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,
@@ -396,42 +442,6 @@ M13 (filter panel) and M14 (direct-relations view) both shipped — see
 Shipped list above. Nothing left planned here; the multi-entity/DAG case
 this section flagged is tracked in Backlog below.
 
-## Planned: annotation layer (M23/M24)
-
-Decided 2026-10-10. Agents composing ClickHouse queries see only names,
-types, DDL, comments and lineage, and guess the rest: grain, units, enum
-values, join keys (ClickHouse has no FKs), dedup/`FINAL` gotchas, deprecated
-tables. Fix: a human-curated annotation layer kept in a git repo (MR review,
-history, CODEOWNERS), pulled into the catalog and served over MCP/API/UI; the
-service can also open MRs against it. The full step-by-step handoff (modules,
-flows, tests, gotchas) is given to the implementing agent separately
-(`~/.claude/plans/let-s-plan-on-extra-giggly-teacup.md`); this section is the
-durable decision record.
-
-| Topic | Decision |
-|---|---|
-| Source | Git repo is the source of truth; the catalog keeps a materialized copy (new `annotations` table, identity-keyed like labels). Reads never touch git. |
-| Flag | `annotations.enabled` in config, off by default = fully inert. Writes need their own flags (`proposals`, `drift_mr`). Token env-only: `OHMYDB_ANNOTATIONS_TOKEN`. |
-| Format | Own per-table YAML, path = identity: `<db>/<table>.yaml`, plus optional `_global.yaml` and `<db>/_database.yaml`. Holds only what introspection can't know: description (first line = summary), grain, status/use_instead, owner, query_hints, columns (description, values), relationships (from_columns/to_columns), examples (question → SQL). Field names follow Apache Ossie (formerly OSI) where they overlap; Ossie itself not adopted (v0.2 still mutable, one model per file). Strict schema (`extra=forbid`). |
-| Clusters | Shared root `path`; optional `cluster_paths` per cluster, with file-level fallback to the shared root. |
-| Transport | `git` CLI over HTTPS + token (auth header passed via `GIT_CONFIG_*` env, never in URL/argv/disk). Reads work with any git host; writes use GitLab push options (`-o merge_request.create`), so `write_repository` scope suffices, no `api` scope. No persistent clone. |
-| Refresh | `serve` polls (`git ls-remote` every `pull_interval`, clone only on a new sha); every `sync` also pulls. |
-| Writes | MCP `propose_annotation` + token-gated HTTP proposals route (merge patch, validated against the live catalog, one MR per proposal); rolling `ohmydb/drift` MR after sync adding stub files for unannotated tables only. The bot can't push to protected `main`. |
-| MCP auth | Same as M19: no app-level token on MCP; Pomerium + flag + MR review. |
-| Surfacing | `get_table`/GET entity: full annotation + per-column descriptions. Listings: `summary` + `status`, `q` searches summary. `get_schema_graph`: global/database hints. Frontend schema panel. |
-| Tooling | `ohmydb annotations validate DIR` (annotation repo CI), `ohmydb annotations schema` (JSON Schema for editors), sample tree in `seed/annotations/`. |
-
-Delivery as two PRs: **M23** read path (config, format + CLIs, seed,
-storage + migration, pull/poll, MCP/API/UI surfacing, git in the Docker
-image) — shipped, see M23 above; then **M24** write path (proposals via
-MCP/HTTP, drift MR) — next.
-
-Deferred (move to Backlog once M24 ships): GitHub/Gitea PR creation, a
-CI/webhook-triggered pull endpoint, Ossie export, reverse relationships or a
-join-path tool, column-level drift edits, ClickHouse table-level `COMMENT` as
-a fallback summary, sparse checkout for monorepos, annotation outcome in the
-`/api/sync` response, auto-sampled categorical values.
-
 ## Backlog
 
 - **Frontend: transitive/multi-entity graph view**: expand M14 beyond one
@@ -451,6 +461,12 @@ a fallback summary, sparse checkout for monorepos, annotation outcome in the
   config), off by default — current model is CLI/POST-triggered only
   (locked decision above). Lets the catalog stay fresh without relying on an
   external cron/CI trigger being wired up.
+- **Annotation layer follow-ups** (deferred at M23/M24): GitHub Enterprise /
+  Gitea PR creation (reads already work there), a CI/webhook-triggered pull endpoint,
+  Ossie export, reverse relationships or a join-path tool, column-level drift
+  edits, ClickHouse table-level `COMMENT` as a fallback summary, sparse
+  checkout for monorepos, annotation outcome in the `/api/sync` response,
+  auto-sampled categorical values.
 - **Observability**: structured logging + basic metrics around sync
   (duration, per-cluster success/failure) and API/MCP calls. Right now a
   sync failure only surfaces as `str(e)` in the `/sync` HTTP response — no

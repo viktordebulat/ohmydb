@@ -11,8 +11,9 @@ repo**: changes go through MR review, with history and CODEOWNERS. ohmydb
 pulls the repo into its catalog and serves it over MCP, the HTTP API and the
 frontend. Everything is off unless `annotations.enabled` is true.
 
-Write path (agent proposals as MRs, drift stubs for new tables) is milestone
-M24 and not shipped yet.
+ohmydb can also write back, only through merge/pull requests a human
+reviews: agent proposals and stub files for new tables. See
+[Write path](#write-path).
 
 ## Repo layout
 
@@ -66,7 +67,7 @@ a file that is empty after that (an unfilled stub) counts as unannotated.
 
 `_global.yaml`: `version: 1` (optional; any other value aborts the pull),
 `query_hints: [str]`, `ignore: [regex]` (`re.search` against `db.table`; such
-tables never get drift stubs — M24). `_database.yaml`: `description`,
+tables never get drift stubs). `_database.yaml`: `description`,
 `query_hints`.
 
 ### YAML pitfalls
@@ -98,12 +99,16 @@ annotations:
   path: ""                  # shared root inside the repo/dir
   cluster_paths: {}         # {cluster: root}, falls back to `path` per file
   pull_interval: 300        # serve only, seconds; 0 = no polling
+  proposals: false          # MCP propose_annotation + HTTP proposals route
+  drift_mr: false           # stub MR for new tables after each sync
+  author: "ohmydb <ohmydb@noreply.invalid>"   # bot commit identity
 ```
 
 `repo`: `https://` or `file://` = git remote; no `://` = local directory, read
 as-is (handy for local dev; `config.example.yaml` points at
 `seed/annotations`). Any other scheme, credentials in the URL, an unknown
-`cluster_paths` cluster, or a negative `pull_interval` fail config load.
+`cluster_paths` cluster, a negative `pull_interval`, `proposals`/`drift_mr`
+with a local dir, or an `author` that isn't `Name <email>` fail config load.
 
 Token: env `OHMYDB_ANNOTATIONS_TOKEN` only (empty = unset). A `token:` key in
 the config is rejected.
@@ -138,6 +143,82 @@ catalog copy untouched.
 
 With the flag off, every payload is exactly the pre-feature shape.
 
+## Write path
+
+Writes never touch the catalog or `ref` directly. Each one is a commit by
+`author` on its own branch, pushed, then opened for review against `ref`
+with label `ohmydb`:
+
+- **GitLab** (any host that isn't github.com): the push carries
+  [push options](https://docs.gitlab.com/user/project/push_options/) that
+  open the merge request and remove the source branch on merge. No API call.
+- **GitHub** (`https://github.com/...` only, not GitHub Enterprise): one REST
+  call after the push opens the pull request, or reuses the open one for
+  the same branch. Enable *Automatically delete head branches* in the repo
+  settings to clean up merged branches. Labeling is best effort.
+
+Nothing changes for readers until a human merges and the next pull runs.
+"MR" below means either.
+
+### Proposals (`proposals: true`)
+
+MCP `propose_annotation(cluster, database, name, patch, rationale)` and
+`POST /api/annotations/{cluster}/{database}/{name}/proposals` with body
+`{"patch": {...}, "rationale": "..."}`. Both exist only while the flag is on.
+The route sits behind `OHMYDB_AUTH_TOKEN` like the other writes; MCP has no
+app-level auth (guard `/mcp` at the proxy).
+
+1. The entity must exist in the catalog (`404` otherwise), `rationale` must
+   be non-empty, and the names must be usable as a file path.
+2. A fresh clone; the target is the file in effect for that cluster: its
+   `cluster_paths` override if one exists, else the shared file, else a new
+   shared file.
+3. `patch` is an [RFC 7386](https://www.rfc-editor.org/rfc/rfc7386) JSON
+   merge patch: maps merge key by key, lists (hints, relationships,
+   examples) are replaced whole, `null` deletes. The file is edited
+   round-trip, so comments, key order and quoting of untouched lines stay
+   byte-identical.
+4. The result must fit the schema, and every column, relationship target,
+   relationship column and `use_instead` must exist in that cluster. All
+   problems come back at once (`422` over HTTP), including ones already in
+   the file, so the caller can fix the patch and retry.
+5. Unchanged text returns `{"status": "unchanged"}`. Otherwise one MR per
+   proposal on `ohmydb/propose/<db>.<table>-<UTC time>-<rand>`; commit
+   subject `annotations(<db>.<table>): <rationale line 1>`.
+
+Returns `{status, branch, merge_request, path}`. `merge_request` is the URL
+of the MR/PR (`null` if GitLab printed none on push).
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/annotations/local/app/events/proposals \
+  -H "Authorization: Bearer $OHMYDB_AUTH_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"patch": {"columns": {"ts": {"description": "Event time, UTC"}}},
+       "rationale": "Checked the producer: ts is set server-side in UTC"}'
+```
+
+### Drift MR (`drift_mr: true`)
+
+After every schema sync (`ohmydb sync`, `POST /api/sync`; not the poller,
+not `annotations pull`), from the same clone as the pull:
+
+- A stub is needed for each catalog table (any kind but `external`) with no
+  file in its cluster's override root or the shared root, not matched by
+  `ignore` in the shared `_global.yaml`. Files are checked on disk, so a
+  file with errors still counts as present. Names starting with `.` or `_`
+  are skipped.
+- Stubs go into the shared root: a header comment, `description: ""`,
+  `grain: ""` and every column with `description: ""`. An unfilled stub
+  reads as unannotated.
+- One rolling branch, `ohmydb/drift`, rebuilt from `ref` each time and
+  force-pushed with a lease. No push when its content didn't change. If the
+  branch head was committed by anyone other than `author`, the step is
+  skipped, so human edits on it are never overwritten.
+- The MR description lists the new tables, plus orphan files (table gone)
+  and stale columns as FYI. Those are never edited.
+
+Existing files are never touched: drift only adds files for new tables. A
+drift failure is reported (`drift=failed ...`) and doesn't undo the pull.
+
 ## Annotation repo CI and editors
 
 ```bash
@@ -164,18 +245,29 @@ For VS Code (redhat.vscode-yaml):
   Needs `git >= 2.31`. Internal CA: `GIT_SSL_CAINFO`. Proxy: `HTTPS_PROXY`.
 - **GitLab, read-only:** project access token, role Reporter, scope
   `read_repository`.
+- **GitLab, proposals / drift MR:** project access token, role Developer,
+  scope `write_repository`. The push creates the MR, so no `api` scope.
+  **Protect `ref`** (no push for Developers, approvals required, CODEOWNERS
+  per db dir): the bot can then only open MRs. If GitLab push rules check
+  the commit email, set `author` to match.
 - **GitHub, read-only (verified):** fine-grained PAT, *Only select
   repositories* → the annotation repo, Repository permissions → Contents:
   Read-only. GitHub ignores the `oauth2` username. Reads work with any git
-  host that accepts HTTP basic auth with a token; writes (M24) need GitLab.
+  host that accepts HTTP basic auth with a token.
+- **GitHub, proposals / drift PR:** same PAT with Contents: Read and write
+  and Pull requests: Read and write (the same token is sent as a Bearer
+  header to `api.github.com`). Add a branch ruleset on `ref` (require a
+  pull request + approval, block force pushes, CODEOWNERS review) so the
+  token can only open PRs.
 - A rejected or missing token fails with git's own message plus a hint to
   check `OHMYDB_ANNOTATIONS_TOKEN`.
 - **Repo placement:** a dedicated repo gives least privilege. A subdir of
   the migrations repo (set `path`) lets schema and annotations change in one
-  MR, but a write-enabled bot (M24) then has push rights there.
+  MR, but a write-enabled bot then has push rights there.
 - **Prompt injection:** annotation text is served verbatim to LLM agents.
-  Review-gated `main` is the control; also keep the strict schema and the
-  `validate` CI. The frontend escapes everything.
+  Review-gated `main` is the control; proposals are agent-written text, so
+  review them like code. Also keep the strict schema, the catalog checks on
+  proposals and the `validate` CI. The frontend escapes everything.
 
 ## Ossie mapping (for a future exporter)
 

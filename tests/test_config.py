@@ -106,6 +106,7 @@ def test_annotations_token_from_env_only(tmp_path, monkeypatch):
     ("  repo: some/dir\n  cluster_paths: {nope: x}\n", "unknown cluster"),
     ("  repo: some/dir\n  pull_interval: -1\n", ">= 0"),
     ("  repo: some/dir\n  token: x\n", "OHMYDB_ANNOTATIONS_TOKEN"),
+    ("  repo: some/dir\n  author: ohmydb\n", "Name <email>"),
 ])
 def test_annotations_config_rejects(tmp_path, block, err):
     with pytest.raises(ValueError, match=err):

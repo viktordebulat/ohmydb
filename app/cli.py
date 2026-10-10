@@ -58,7 +58,7 @@ def main() -> None:
             # Schema sync already succeeded — an annotation failure is
             # reported but doesn't fail the command.
             try:
-                _pull_annotations(cfg)
+                _pull_annotations(cfg, with_drift=True)
             except Exception as e:
                 print(f"annotations: pull failed: {e}", file=sys.stderr)
     elif args.command == "serve":
@@ -82,11 +82,12 @@ def main() -> None:
             sys.exit(1)
 
 
-def _pull_annotations(cfg) -> None:
-    from app.annotations.service import format_result, sync_annotations
+def _pull_annotations(cfg, with_drift: bool = False) -> None:
+    """`annotations pull` only pulls; `sync` also runs the drift MR step."""
+    from app.annotations.service import format_result, pull, sync_annotations
     from app.store.db import make_session_factory
 
-    result = sync_annotations(cfg, make_session_factory(cfg.storage_url))
+    result = (sync_annotations if with_drift else pull)(cfg, make_session_factory(cfg.storage_url))
     print(format_result(result))
     for e in result["errors"]:
         print(f"annotations: {e}", file=sys.stderr)

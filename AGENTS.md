@@ -48,9 +48,9 @@ Config/deploy notes not covered there:
   (prod, set `host`/`port`/`username`/`password`/`database`); `POSTGRES_USER`/
   `POSTGRES_PASSWORD` env override the postgres secrets, same pattern as CH.
   `OHMYDB_AUTH_TOKEN` (env-only, no yaml field) enables bearer-token auth on
-  the three mutating HTTP routes (`POST /sync`, `PUT`/`DELETE /labels`) —
-  unset by default, reads/MCP unaffected either way. See README's Auth
-  section for the request example.
+  the mutating HTTP routes (`POST /sync`, `PUT`/`DELETE /labels`, annotation
+  proposals) — unset by default, reads/MCP unaffected either way. See
+  README's Auth section for the request example.
   `annotations` block (off by default): repo-backed annotation layer, see
   `docs/ANNOTATIONS.md`; its git token is env-only
   (`OHMYDB_ANNOTATIONS_TOKEN`), a `token:` yaml key is rejected.

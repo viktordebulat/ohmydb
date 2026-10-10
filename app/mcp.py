@@ -1,9 +1,11 @@
 """MCP server for AI agents: same catalog reads as the HTTP API."""
 
+import asyncio
 from typing import Literal
 
 from fastmcp import FastMCP
 
+from app.annotations.service import ProposalError, propose
 from app.config import AppConfig
 from app.store.db import make_session_factory
 from app.store.queries import get_entity, get_relations, graph_payload, list_entities
@@ -130,5 +132,41 @@ def create_mcp(cfg: AppConfig) -> FastMCP:
             "columns": columns,
             "rows": [[n[c] for c in columns] for n in matches],
         }
+
+    if annotated and cfg.annotations.proposals:
+
+        @mcp.tool
+        async def propose_annotation(cluster: str, database: str, name: str, patch: dict, rationale: str) -> dict:
+            """Propose a change to a table's human-curated annotation. Opens a
+            merge request in the annotation repo; a human reviews it and
+            nothing changes until it is merged.
+
+            Use it when you learned something non-obvious that future queries
+            need and that isn't already in get_table's `annotation`: what a
+            column means, units, enum values, join keys, a gotcha (FINAL,
+            dedup, partial data), or a query you verified by running it.
+
+            `patch` is a JSON merge patch (RFC 7386) against the annotation
+            file — same shape as get_table's `annotation` plus `columns`:
+            {"columns": {"amount": {"description": "Order total, cents"}},
+             "query_hints": [...]}. Maps merge key by key; lists (query_hints,
+            relationships, examples, list-style values) are REPLACED wholesale,
+            so send the full list including the current entries from
+            get_table; null deletes a key. Columns, relationship targets and
+            use_instead are checked against the live catalog; on rejection
+            the error lists every problem (also ones already in the file) —
+            fix the patch and retry.
+
+            `rationale`: the evidence — what you checked and how (query run,
+            result seen, source). First line becomes the commit subject.
+
+            Returns {status: proposed|unchanged, branch, merge_request (URL or
+            null), path}."""
+            try:
+                return await asyncio.to_thread(
+                    propose, cfg, factory, cluster, database, name, patch, rationale, "MCP"
+                )
+            except ProposalError as e:
+                raise ValueError("\n".join(e.errors)) from None
 
     return mcp

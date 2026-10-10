@@ -251,6 +251,16 @@ def _attach_annotation(session: Session, payload: dict) -> None:
     payload["columns"] = [{**c, **col_docs.get(c["name"], {})} for c in payload["columns"]]
 
 
+def catalog_columns(session: Session) -> dict[tuple, tuple[str, list[str]]]:
+    """(kind, column names) per entity identity — the annotation write path
+    checks drift stubs and proposals against this."""
+    stmt = select(EntityRow.cluster, EntityRow.database, EntityRow.name, EntityRow.kind, EntityRow.columns)
+    return {
+        (c, db, name): (kind, [col["name"] for col in columns or []])
+        for c, db, name, kind, columns in session.execute(stmt)
+    }
+
+
 def get_relations(
     session: Session, cluster: str, database: str, name: str, direct_only: bool = False
 ) -> dict | None:

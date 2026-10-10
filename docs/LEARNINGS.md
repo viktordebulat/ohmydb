@@ -123,6 +123,15 @@ Gotchas discovered during implementation. Append after each task, then compact
   starting extra background tasks keeps `/mcp` working. `TestClient(app)`
   without `with` never runs the lifespan; uvicorn (test_web_ui) does, so
   set `pull_interval=0` in test configs.
+- Annotation writes (M24): ruamel round-trip merges into an existing map
+  keep its style, so a patch into a flow map (`ts: {description: ...}`)
+  stays flow. New multi-line strings dump as quoted `\n` soup unless
+  wrapped in `LiteralScalarString` (`model._to_rt`). A bare test remote
+  rejects `git push -o` unless `receive.advertisePushOptions=true`; a
+  `pre-receive` hook printing `GIT_PUSH_OPTION_<i>` shows what GitLab
+  would get, and its stderr reaches the client like GitLab's MR link does.
+  Drift must check stub targets on disk, not the parsed tree: a file with
+  errors is missing from the tree but must not be overwritten.
 
 ## Docker
 

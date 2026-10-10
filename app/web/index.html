@@ -58,6 +58,7 @@
             <tr><td><code>PUT /api/labels/{cluster}/{database}/{table}</code> 🔒</td><td>Set a label. Body <code>{"key": ..., "value": ...}</code>.</td></tr>
             <tr><td><code>DELETE /api/labels/{cluster}/{database}/{table}/{key}</code> 🔒</td><td>Remove a label.</td></tr>
             <tr><td><code>POST /api/sync?cluster=</code> 🔒</td><td>Re-introspect and re-sync the catalog — all clusters, or one if <code>cluster</code> is given. Also pulls annotations when enabled.</td></tr>
+            <tr><td><code>POST /api/annotations/{cluster}/{database}/{name}/proposals</code> 🔒</td><td>Only with <code>annotations.proposals</code> on. Body <code>{"patch": {...}, "rationale": "..."}</code>: JSON merge patch against the table's annotation file, checked against the catalog (<code>422</code> lists every problem), opened as a GitLab merge request or GitHub pull request. Same as <code>propose_annotation</code>.</td></tr>
           </tbody>
         </table>
       </section>
@@ -71,6 +72,7 @@
             <tr><td><code>get_table(cluster, database, name)</code></td><td>Full detail for one entity: columns with types/comments, raw DDL, engine, attrs, labels. With annotations on: <code>annotation</code> (description, grain, status, hints, relationships, examples) and column descriptions/values.</td></tr>
             <tr><td><code>get_table_relations(cluster, database, name, direct=False)</code></td><td>Transitive upstream/downstream entities. <code>direct=True</code> for only immediate 1-hop neighbors.</td></tr>
             <tr><td><code>find_tables(query, column, column_type, match, kind, cluster)</code></td><td>Search entities across all clusters; all filters optional (at least one), ANDed. <code>query</code>: <code>key:value</code> exact label lookup, else substring of name/database/label. <code>column</code>: case-insensitive name globs (<code>*_id</code>), <code>match="all"|"any"</code>. <code>column_type</code>: exact type on the same column. Adds <code>matched_columns</code>. With annotations on: <code>query</code> also matches summary; <code>summary</code>/<code>status</code> columns.</td></tr>
+            <tr><td><code>propose_annotation(cluster, database, name, patch, rationale)</code></td><td>Only with <code>annotations.proposals</code> on. Merge patch (maps merge, lists replace, <code>null</code> deletes) against the table's annotation, validated against the live catalog, opened as a merge request for human review. Returns the branch and MR URL.</td></tr>
           </tbody>
         </table>
       </section>
