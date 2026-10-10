@@ -254,11 +254,13 @@ For VS Code (redhat.vscode-yaml):
   repositories* → the annotation repo, Repository permissions → Contents:
   Read-only. GitHub ignores the `oauth2` username. Reads work with any git
   host that accepts HTTP basic auth with a token.
-- **GitHub, proposals / drift PR:** same PAT with Contents: Read and write
-  and Pull requests: Read and write (the same token is sent as a Bearer
-  header to `api.github.com`). Add a branch ruleset on `ref` (require a
-  pull request + approval, block force pushes, CODEOWNERS review) so the
-  token can only open PRs.
+- **GitHub, proposals / drift PR (verified):** same PAT with Contents: Read
+  and write and Pull requests: Read and write (the same token is sent as a
+  Bearer header to `api.github.com`). Add a branch ruleset on `ref` (require
+  a pull request + approval, block force pushes, CODEOWNERS review) so the
+  token can only open PRs. Rulesets and branch protection on a *private*
+  repo need GitHub Pro/Team; without them a Contents-write token can push
+  to `ref` directly.
 - A rejected or missing token fails with git's own message plus a hint to
   check `OHMYDB_ANNOTATIONS_TOKEN`.
 - **Repo placement:** a dedicated repo gives least privilege. A subdir of

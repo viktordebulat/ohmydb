@@ -131,7 +131,11 @@ Gotchas discovered during implementation. Append after each task, then compact
   `pre-receive` hook printing `GIT_PUSH_OPTION_<i>` shows what GitLab
   would get, and its stderr reaches the client like GitLab's MR link does.
   Drift must check stub targets on disk, not the parsed tree: a file with
-  errors is missing from the tree but must not be overwritten.
+  errors is missing from the tree but must not be overwritten. GitHub has
+  no push options; verified 2026-10-10 on a private repo: a fine-grained
+  PAT (Contents + Pull requests write) pushes via the Basic header and opens
+  PRs as a Bearer token, labels included. Rulesets on private repos need a
+  paid plan (API 403 otherwise).
 
 ## Docker
 
