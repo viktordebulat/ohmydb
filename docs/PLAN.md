@@ -330,6 +330,18 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   label at all". Added a "clear filters" button (resets all fields, drops
   every label row) and `title` tooltips across the filter bar and sortable
   headers.
+- **M22 (2026-10-10)**: column search. `find_tables` (MCP), new
+  `GET /api/search` (its cross-cluster HTTP twin) and `GET /api/graph/
+  {cluster}` gained optional `column` (repeatable, case-insensitive name
+  globs), `column_type` (exact type, bound to the same column as each
+  pattern), `match` (`all`/`any` between patterns) and `kind`; all filters
+  ANDed with existing `q`. Before this, search supported exactly one
+  condition (`q`). Logic in `store/queries.py: _filter/_column_hits` over
+  the stored `columns` JSON — no migration, DB-agnostic. Results gain
+  `matched_columns` when a column filter is active. `find_tables` and
+  `/api/search` reject a call with no filter (would dump the catalog).
+  Known limitation: one `column_type` for all patterns — per-column types
+  ("user_id:UInt64 AND ts:DateTime") not expressible; add if asked.
 
 Storage schema, sync algorithm, and ClickHouse edge-extraction rules are no
 longer described here — read the code (`app/store/db.py`, `app/store/repo.py`,

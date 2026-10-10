@@ -51,7 +51,8 @@
         <table class="ref-table">
           <tbody>
             <tr><td><code>GET /api/clusters</code></td><td>Configured cluster names.</td></tr>
-            <tr><td><code>GET /api/graph/{cluster}?q=</code></td><td>Catalog nodes for one cluster (tables, views, materialized views, dictionaries, with labels). No edges. Optional <code>q</code>: substring match against name/database/labels, or <code>key:value</code> for an exact label lookup.</td></tr>
+            <tr><td><code>GET /api/graph/{cluster}?q=&amp;column=&amp;column_type=&amp;match=&amp;kind=</code></td><td>Catalog nodes for one cluster (tables, views, materialized views, dictionaries, with labels). No edges. Optional <code>q</code>: substring match against name/database/labels, or <code>key:value</code> for an exact label lookup. Column filters: same as <code>find_tables</code>.</td></tr>
+            <tr><td><code>GET /api/search?q=&amp;column=&amp;column_type=&amp;match=&amp;kind=&amp;cluster=</code></td><td>Cross-cluster search, same filters as <code>find_tables</code> (<code>column</code> repeatable), at least one required.</td></tr>
             <tr><td><code>GET /api/entities/{cluster}/{database}/{name}</code></td><td>Full entity detail: columns with types/comments, raw DDL, engine, attrs, labels.</td></tr>
             <tr><td><code>GET /api/entities/{cluster}/{database}/{name}/relations?direct=</code></td><td>Transitive upstream (data sources) and downstream (consumers). <code>direct=true</code> limits to immediate 1-hop neighbors.</td></tr>
             <tr><td><code>PUT /api/labels/{cluster}/{database}/{table}</code> 🔒</td><td>Set a label. Body <code>{"key": ..., "value": ...}</code>.</td></tr>
@@ -69,7 +70,7 @@
             <tr><td><code>get_schema_graph(cluster)</code></td><td>Catalog nodes for one cluster, with labels. No dependency edges — call <code>get_table_relations</code> for one entity's upstream/downstream.</td></tr>
             <tr><td><code>get_table(cluster, database, name)</code></td><td>Full detail for one entity: columns with types/comments, raw DDL, engine, attrs, labels.</td></tr>
             <tr><td><code>get_table_relations(cluster, database, name, direct=False)</code></td><td>Transitive upstream/downstream entities. <code>direct=True</code> for only immediate 1-hop neighbors.</td></tr>
-            <tr><td><code>find_tables(query)</code></td><td>Search entities across all clusters. <code>key:value</code> does an exact label lookup; otherwise substring match against name, database, or any label key/value.</td></tr>
+            <tr><td><code>find_tables(query, column, column_type, match, kind, cluster)</code></td><td>Search entities across all clusters; all filters optional (at least one), ANDed. <code>query</code>: <code>key:value</code> exact label lookup, else substring of name/database/label. <code>column</code>: case-insensitive name globs (<code>*_id</code>), <code>match="all"|"any"</code>. <code>column_type</code>: exact type on the same column. Adds <code>matched_columns</code>.</td></tr>
           </tbody>
         </table>
       </section>

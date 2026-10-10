@@ -4,7 +4,7 @@ import json
 from fastmcp import Client
 
 from app.config import AppConfig, ClusterConfig
-from app.core.models import Entity, EntityKind
+from app.core.models import Column, Entity, EntityKind
 from app.mcp import create_mcp
 from app.store.db import make_session_factory
 from app.store.queries import set_label
@@ -16,8 +16,10 @@ def _mcp(tmp_path):
     factory = make_session_factory(url)
     with factory() as s:
         sync_cluster(s, "c1", [
-            Entity(cluster="c1", database="app", name="events", kind=EntityKind.TABLE),
-            Entity(cluster="c1", database="app", name="users", kind=EntityKind.TABLE),
+            Entity(cluster="c1", database="app", name="events", kind=EntityKind.TABLE,
+                   columns=[Column("ts", "DateTime"), Column("user_id", "UInt64")]),
+            Entity(cluster="c1", database="app", name="users", kind=EntityKind.TABLE,
+                   columns=[Column("user_id", "UInt64")]),
         ], [])
         set_label(s, "c1", "app", "events", "source", "vector")
     cfg = AppConfig(storage_url=url, clusters=[ClusterConfig(name="c1", host="localhost")])
@@ -54,6 +56,15 @@ def test_mcp_tools(tmp_path):
             assert [row[name_idx] for row in found["rows"]] == ["events"]
             found = _payload(await c.call_tool("find_tables", {"query": "source:vec"}))
             assert found["rows"] == []
+            assert "matched_columns" not in found["columns"]
+
+            found = _payload(await c.call_tool("find_tables", {"column": ["user_id", "ts"]}))
+            assert [row[name_idx] for row in found["rows"]] == ["events"]
+            mc_idx = found["columns"].index("matched_columns")
+            assert found["rows"][0][mc_idx] == ["ts", "user_id"]
+            found = _payload(await c.call_tool(
+                "find_tables", {"column": ["user_id", "ts"], "match": "any"}))
+            assert {row[name_idx] for row in found["rows"]} == {"events", "users"}
 
             rel = _payload(await c.call_tool(
                 "get_table_relations", {"cluster": "c1", "database": "app", "name": "events"}))

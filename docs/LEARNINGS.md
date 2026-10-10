@@ -97,6 +97,11 @@ Gotchas discovered during implementation. Append after each task, then compact
   Fixed by validating match keys at config load (`app/core/labeling.py:
   validate_label_rules`, called from `load_config`) so a typo'd key raises
   before sync ever runs, not a silently-wrong result discovered in output.
+- Column search (M22): `fnmatch.fnmatch` applies `os.path.normcase`, so it's
+  case-insensitive on Windows only — use `fnmatchcase` on lowered strings for
+  portable case-insensitive globs. FastAPI list query params
+  (`?column=a&column=b`) need an explicit `= Query(None)`; a bare
+  `list[str] | None = None` is read as a request body.
 
 ## Docker
 
