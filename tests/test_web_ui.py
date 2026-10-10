@@ -163,4 +163,7 @@ def test_schema_panel_renders_annotation(live_server):
         page.wait_for_selector("#schema-body .annotation")
         assert page.text_content("#schema-body .ann-desc") == ANNOTATION_DESC
         assert page.text_content("#schema-body .ann-badge") == "deprecated"
+        # grain/owner not declared in the fixture's doc -> not rendered at all
+        assert page.locator("#schema-body .ann-key").count() == 0
+        assert "grain" not in page.text_content("#schema-body")
         browser.close()

@@ -360,6 +360,10 @@ function annotationHtml(a) {
     const instead = a.use_instead ? `use <code>${escapeHtml(a.use_instead)}</code> instead` : '';
     parts.push(`<div class="ann-line">${badge}${instead}</div>`);
   }
+  // only fields the annotation actually declares
+  for (const key of ['grain', 'owner']) {
+    if (a[key]) parts.push(`<div class="ann-line"><span class="ann-key">${key}</span> ${escapeHtml(a[key])}</div>`);
+  }
   const list = (title, items) => items && items.length
     ? `<div class="ann-h">${title}</div><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul>` : '';
   parts.push(list('query hints', (a.query_hints || []).map(escapeHtml)));
@@ -392,8 +396,6 @@ async function showSchema(cluster, database, name) {
   schemaCopyBtn.disabled = !lastSchemaDdl;
   const ann = e.annotation;
   const meta = [
-    ['grain', ann && ann.grain],
-    ['owner', ann && ann.owner],
     ['kind', e.kind],
     ['engine', e.engine_full || e.engine || ''],
     ['primary key', e.primary_key || ''],

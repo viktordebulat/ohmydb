@@ -205,6 +205,7 @@ tbody tr.selected { background: var(--border); }
   font-size: 11px; color: var(--ink);
 }
 #schema-body .ann-h { margin-top: 8px; color: var(--muted); font-size: 11px; }
+#schema-body .ann-key { color: var(--muted); font-size: 11px; margin-right: 4px; }
 #schema-body .annotation ul { margin: 2px 0 0; padding-left: 18px; }
 #schema-body .annotation li { margin: 2px 0; }
 #schema-body .annotation code, #schema-body .annotation pre {
