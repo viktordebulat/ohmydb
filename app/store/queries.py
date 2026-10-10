@@ -1,6 +1,9 @@
 """Read/label helpers shared by API and MCP. Orphan labels (no matching
 entity) are excluded from all reads but kept in the table."""
 
+import fnmatch
+from collections.abc import Sequence
+
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
@@ -51,21 +54,88 @@ def _matches(node: dict, q: str) -> bool:
     )
 
 
-def list_entities(session: Session, cluster: str | None = None, q: str | None = None) -> list[dict]:
-    """Node listing, no edges — used by search (find_tables) which scans
-    across all clusters and doesn't need the full graph. `q` filters via
-    _matches (see there for substring vs key:value semantics)."""
-    stmt = select(EntityRow)
-    if cluster is not None:
-        stmt = stmt.where(EntityRow.cluster == cluster)
-    entities = session.scalars(stmt).all()
+def _column_hits(
+    columns: list[dict], patterns: list[str] | None, column_type: str | None, match: str
+) -> list[str] | None:
+    """Names of the columns satisfying the column filter, or None when the
+    entity doesn't match. Each pattern is a case-insensitive glob on the
+    column name (fnmatchcase on lowered strings — fnmatch.fnmatch's case
+    handling is OS-dependent); `column_type` is an exact type match bound to
+    the same column as each pattern. `match` = "all" requires every pattern
+    to hit some column, "any" at least one."""
+    if column_type is not None:
+        columns = [c for c in columns if c["type"] == column_type]
+    if not patterns:
+        hits = [c["name"] for c in columns]
+        return hits or None
+    per_pattern = [
+        {c["name"] for c in columns if fnmatch.fnmatchcase(c["name"].lower(), p.lower())}
+        for p in patterns
+    ]
+    if not (all if match == "all" else any)(per_pattern):
+        return None
+    hit = set().union(*per_pattern)
+    return [c["name"] for c in columns if c["name"] in hit]
+
+
+def _filter(
+    session: Session,
+    entities: Sequence[EntityRow],
+    q: str | None,
+    column: list[str] | None,
+    column_type: str | None,
+    match: str,
+    kind: str | None,
+) -> list[dict]:
+    """Shared search filter: every given condition must hold (AND). Column
+    conditions run on raw rows (briefs don't carry columns); matching column
+    names are attached as `matched_columns` when a column filter is active."""
+    if kind is not None:
+        entities = [e for e in entities if e.kind == kind]
+    hits: dict[int, list[str]] = {}
+    if column or column_type is not None:
+        for e in entities:
+            names = _column_hits(e.columns or [], column, column_type, match)
+            if names is not None:
+                hits[e.id] = names
+        entities = [e for e in entities if e.id in hits]
     briefs = _node_briefs(session, entities)
+    if hits:
+        for b in briefs:
+            b["matched_columns"] = hits[b["id"]]
     if q is not None:
         briefs = [n for n in briefs if _matches(n, q)]
     return briefs
 
 
-def graph_payload(session: Session, cluster: str, q: str | None = None) -> dict:
+def list_entities(
+    session: Session,
+    cluster: str | None = None,
+    q: str | None = None,
+    column: list[str] | None = None,
+    column_type: str | None = None,
+    match: str = "all",
+    kind: str | None = None,
+) -> list[dict]:
+    """Node listing, no edges — used by search (find_tables, /api/search)
+    which scans across all clusters and doesn't need the full graph. Filters
+    via _filter (see there and _matches/_column_hits for semantics)."""
+    stmt = select(EntityRow)
+    if cluster is not None:
+        stmt = stmt.where(EntityRow.cluster == cluster)
+    entities = session.scalars(stmt).all()
+    return _filter(session, entities, q, column, column_type, match, kind)
+
+
+def graph_payload(
+    session: Session,
+    cluster: str,
+    q: str | None = None,
+    column: list[str] | None = None,
+    column_type: str | None = None,
+    match: str = "all",
+    kind: str | None = None,
+) -> dict:
     # No edges list — redundant with per-entity upstream/downstream
     # (see get_relations); a caller wanting dependency direction for one
     # entity should call that instead of walking edges here.
@@ -73,9 +143,7 @@ def graph_payload(session: Session, cluster: str, q: str | None = None) -> dict:
     # One value for the whole graph, not per node — a sync writes the same
     # timestamp to every entity of a cluster in one transaction.
     synced_at = max((e.synced_at for e in entities if e.synced_at), default=None)
-    nodes = _node_briefs(session, entities)
-    if q is not None:
-        nodes = [n for n in nodes if _matches(n, q)]
+    nodes = _filter(session, entities, q, column, column_type, match, kind)
     return {
         "synced_at": synced_at.isoformat() if synced_at else None,
         "nodes": nodes,

@@ -2,8 +2,9 @@
 static frontend."""
 
 from pathlib import Path
+from typing import Literal
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -16,6 +17,7 @@ from app.store.queries import (
     get_entity,
     get_relations,
     graph_payload,
+    list_entities,
     set_label,
 )
 
@@ -65,9 +67,33 @@ def create_app(cfg: AppConfig) -> FastAPI:
         return [c.name for c in cfg.clusters]
 
     @api.get("/graph/{cluster}")
-    def graph(cluster: str, q: str | None = None) -> dict:
+    def graph(
+        cluster: str,
+        q: str | None = None,
+        column: list[str] | None = Query(None),
+        column_type: str | None = None,
+        match: Literal["all", "any"] = "all",
+        kind: str | None = None,
+    ) -> dict:
         with factory() as s:
-            return graph_payload(s, cluster, q)
+            return graph_payload(s, cluster, q, column, column_type, match, kind)
+
+    @api.get("/search")
+    def search(
+        q: str | None = None,
+        column: list[str] | None = Query(None),
+        column_type: str | None = None,
+        match: Literal["all", "any"] = "all",
+        kind: str | None = None,
+        cluster: str | None = None,
+    ) -> dict:
+        """Cross-cluster search, HTTP twin of MCP find_tables. All filters
+        optional and ANDed; at least one required so a bare call doesn't
+        dump the whole catalog."""
+        if q is None and not column and column_type is None and kind is None:
+            raise HTTPException(status_code=400, detail="give at least one of q, column, column_type, kind")
+        with factory() as s:
+            return {"nodes": list_entities(s, cluster, q, column, column_type, match, kind)}
 
     @api.get("/entities/{cluster}/{database}/{name}")
     def entity(cluster: str, database: str, name: str) -> dict:

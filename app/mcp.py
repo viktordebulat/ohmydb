@@ -1,5 +1,7 @@
 """MCP server for AI agents: same catalog reads as the HTTP API."""
 
+from typing import Literal
+
 from fastmcp import FastMCP
 
 from app.config import AppConfig
@@ -61,15 +63,44 @@ def create_mcp(cfg: AppConfig) -> FastMCP:
         return payload
 
     @mcp.tool
-    def find_tables(query: str) -> dict:
-        """Search entities across all clusters. `key:value` (colon present)
-        does an exact label lookup; otherwise substring match against name,
-        database, or any label key/value. Rows encoded as `columns` + `rows`
-        (array-of-arrays) instead of one dict per match, to cut repeated key
-        names at scale — zip(columns, row) to get a match dict back."""
+    def find_tables(
+        query: str | None = None,
+        column: list[str] | None = None,
+        column_type: str | None = None,
+        match: Literal["all", "any"] = "all",
+        kind: str | None = None,
+        cluster: str | None = None,
+    ) -> dict:
+        """Search entities across all clusters (or one, via `cluster`). All
+        filters optional and ANDed; give at least one.
+
+        - `query`: `key:value` (colon present) does an exact label lookup;
+          otherwise substring match against name, database, or any label
+          key/value.
+        - `column`: case-insensitive globs on column names (`user_id`,
+          `*_id`, `*time*`). `match="all"` (default) requires every pattern
+          to hit a column, `match="any"` at least one.
+        - `column_type`: exact column type (`DateTime`, `UInt64`,
+          `Nullable(String)`), bound to the same column as each `column`
+          pattern; alone, matches entities having any column of that type.
+        - `kind`: exact entity kind (table, view, mat_view, dictionary,
+          external).
+
+        Examples: tables with both user_id and ts:
+        `column=["user_id", "ts"]`; any `*_at` column typed DateTime:
+        `column=["*_at"], column_type="DateTime"`.
+
+        Rows encoded as `columns` + `rows` (array-of-arrays) instead of one
+        dict per match, to cut repeated key names at scale — zip(columns,
+        row) to get a match dict back. A `matched_columns` column (names of
+        the columns that hit) is added when a column filter is given."""
+        if query is None and not column and column_type is None and kind is None:
+            raise ValueError("give at least one of query, column, column_type, kind")
         with factory() as s:
-            matches = list_entities(s, q=query)
+            matches = list_entities(s, cluster, query, column, column_type, match, kind)
         columns = ["cluster", "database", "name", "kind", "labels"]
+        if column or column_type is not None:
+            columns.append("matched_columns")
         return {
             "columns": columns,
             "rows": [[n[c] for c in columns] for n in matches],

@@ -14,8 +14,9 @@ def _client(tmp_path, auth_token=None):
         sync_cluster(s, "c1", [
             Entity(cluster="c1", database="app", name="events", kind=EntityKind.TABLE,
                    engine="MergeTree", ddl="CREATE TABLE app.events ...",
-                   columns=[Column("ts", "DateTime", "event time")]),
-            Entity(cluster="c1", database="analytics", name="mv", kind=EntityKind.MAT_VIEW),
+                   columns=[Column("ts", "DateTime", "event time"), Column("user_id", "UInt64")]),
+            Entity(cluster="c1", database="analytics", name="mv", kind=EntityKind.MAT_VIEW,
+                   columns=[Column("user_id", "UInt64")]),
         ], [Edge(("c1", "analytics", "mv"), ("c1", "app", "events"), EdgeKind.READS_FROM)])
     cfg = AppConfig(storage_url=url, clusters=[ClusterConfig(name="c1", host="localhost")], auth_token=auth_token)
     return TestClient(create_app(cfg))
@@ -53,7 +54,7 @@ def test_entity_detail_and_404(tmp_path):
     assert r.status_code == 200
     body = r.json()
     assert body["engine"] == "MergeTree"
-    assert body["columns"] == [{"name": "ts", "type": "DateTime", "comment": "event time"}]
+    assert body["columns"][0] == {"name": "ts", "type": "DateTime", "comment": "event time"}
     assert client.get("/api/entities/c1/app/nope").status_code == 404
 
 
@@ -88,6 +89,30 @@ def test_graph_search_by_label_key_value(tmp_path):
     assert {n["name"] for n in client.get("/api/graph/c1?q=source:vector").json()["nodes"]} == {"events"}
     assert client.get("/api/graph/c1?q=source:vec").json()["nodes"] == []
     assert client.get("/api/graph/c1?q=other:vector").json()["nodes"] == []
+
+
+def test_search_by_columns(tmp_path):
+    client = _client(tmp_path)
+
+    def names(qs):
+        r = client.get(f"/api/search?{qs}")
+        assert r.status_code == 200
+        return {n["name"] for n in r.json()["nodes"]}
+
+    nodes = client.get("/api/search?column=*_id").json()["nodes"]
+    assert {n["name"] for n in nodes} == {"events", "mv"}
+    assert all(n["matched_columns"] == ["user_id"] for n in nodes)
+    assert names("column=user_id&column=ts") == {"events"}
+    assert names("column=user_id&column=ts&match=any") == {"events", "mv"}
+    assert names("column_type=DateTime") == {"events"}
+    assert names("column=user_id&column_type=DateTime") == set()  # same-column binding
+    assert names("column=USER_ID&kind=mat_view") == {"mv"}
+    assert names("column=user_id&q=analytics") == {"mv"}
+    assert names("q=events") == {"events"}
+    assert client.get("/api/search").status_code == 400
+    g = client.get("/api/graph/c1?column=ts").json()
+    assert [n["name"] for n in g["nodes"]] == ["events"]
+    assert "matched_columns" not in client.get("/api/graph/c1").json()["nodes"][0]
 
 
 def test_labels_crud(tmp_path):

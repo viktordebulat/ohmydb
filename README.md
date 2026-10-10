@@ -30,7 +30,7 @@ The catalog is exposed as an MCP server at `/mcp/`:
 | `get_schema_graph` | `cluster` | Catalog nodes for one cluster (tables, views, MVs, dictionaries + labels) and the cluster's last `synced_at`. No edges — see `get_table_relations`. |
 | `get_table` | `cluster`, `database`, `name` | One entity in full: columns with types/comments, raw DDL, engine, attrs, labels. |
 | `get_table_relations` | `cluster`, `database`, `name`, `direct` (optional, default `False`) | The entity plus its upstream sources and downstream consumers — transitive by default, or just 1-hop neighbors when `direct=True` (no separate edge list — membership in upstream/downstream already implies direction). |
-| `find_tables` | `query` | Brief matches (identity + kind + labels) by substring of name, database, or label — or an exact `key:value` label lookup when `query` contains a colon. |
+| `find_tables` | `query`, `column`, `column_type`, `match`, `kind`, `cluster` (all optional, ≥1 required, ANDed) | Brief matches (identity + kind + labels). `query`: substring of name, database, or label — or exact `key:value` label lookup when it contains a colon. `column`: list of case-insensitive name globs (`*_id`); `match="all"` (default) needs every pattern to hit, `"any"` one. `column_type`: exact type, bound to the same column as each pattern. Adds `matched_columns` when a column filter is given. |
 
 ## HTTP API
 
@@ -41,7 +41,8 @@ All paths below are under `/api`.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/clusters` | Configured cluster names. |
-| `GET` | `/api/graph/{cluster}?q=` | Catalog nodes for one cluster + `synced_at`. Same no-edges shape as `get_schema_graph`. Optional `q` filters by substring of name/database/label, or exact `key:value` label lookup. |
+| `GET` | `/api/graph/{cluster}?q=&column=&column_type=&match=&kind=` | Catalog nodes for one cluster + `synced_at`. Same no-edges shape as `get_schema_graph`. Optional filters, same semantics as `find_tables` (`column` repeatable). |
+| `GET` | `/api/search?q=&column=&column_type=&match=&kind=&cluster=` | Cross-cluster search, HTTP twin of `find_tables` → `{"nodes": [...]}`. At least one filter required (else `400`). E.g. `?column=user_id&column=ts&match=all`. |
 | `GET` | `/api/entities/{cluster}/{database}/{name}` | One entity in full. |
 | `GET` | `/api/entities/{cluster}/{database}/{name}/relations?direct=` | Upstream/downstream relations for an entity — transitive by default, 1-hop only when `direct=true`. |
 | `PUT` | `/api/labels/{cluster}/{database}/{table}` | Set a label. Body: `{"key": "...", "value": "..."}`. Always marks it `manual` (see below). |
