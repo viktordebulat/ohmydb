@@ -22,6 +22,7 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
 | Sync trigger | CLI command + POST /sync endpoint (same code path). No scheduler. |
 | Scope | Multi-cluster from day one. Entities namespaced by cluster. |
 | Detail | Structured columns (name/type/comment) + raw DDL + attrs (engine, keys, refreshable). |
+| Annotations | **Decided 2026-10-10.** Repo-backed, flag-gated (`annotations.enabled`, off by default): per-table YAML in a git repo, pulled into the catalog; writes only via GitLab MRs. See "Planned: annotation layer" below. |
 
 ## Shipped (milestones)
 
@@ -378,6 +379,41 @@ an already-fetched cluster payload.
 M13 (filter panel) and M14 (direct-relations view) both shipped — see
 Shipped list above. Nothing left planned here; the multi-entity/DAG case
 this section flagged is tracked in Backlog below.
+
+## Planned: annotation layer (M23/M24)
+
+Decided 2026-10-10. Agents composing ClickHouse queries see only names,
+types, DDL, comments and lineage, and guess the rest: grain, units, enum
+values, join keys (ClickHouse has no FKs), dedup/`FINAL` gotchas, deprecated
+tables. Fix: a human-curated annotation layer kept in a git repo (MR review,
+history, CODEOWNERS), pulled into the catalog and served over MCP/API/UI; the
+service can also open MRs against it. The full step-by-step handoff (modules,
+flows, tests, gotchas) is given to the implementing agent separately
+(`~/.claude/plans/let-s-plan-on-extra-giggly-teacup.md`); this section is the
+durable decision record.
+
+| Topic | Decision |
+|---|---|
+| Source | Git repo is the source of truth; the catalog keeps a materialized copy (new `annotations` table, identity-keyed like labels). Reads never touch git. |
+| Flag | `annotations.enabled` in config, off by default = fully inert. Writes need their own flags (`proposals`, `drift_mr`). Token env-only: `OHMYDB_ANNOTATIONS_TOKEN`. |
+| Format | Own per-table YAML, path = identity: `<db>/<table>.yaml`, plus optional `_global.yaml` and `<db>/_database.yaml`. Holds only what introspection can't know: description (first line = summary), grain, status/use_instead, owner, query_hints, columns (description, values), relationships (from_columns/to_columns), examples (question → SQL). Field names follow Apache Ossie (formerly OSI) where they overlap; Ossie itself not adopted (v0.2 still mutable, one model per file). Strict schema (`extra=forbid`). |
+| Clusters | Shared root `path`; optional `cluster_paths` per cluster, with file-level fallback to the shared root. |
+| Transport | `git` CLI over HTTPS + token (auth header passed via `GIT_CONFIG_*` env, never in URL/argv/disk). Reads work with any git host; writes use GitLab push options (`-o merge_request.create`), so `write_repository` scope suffices, no `api` scope. No persistent clone. |
+| Refresh | `serve` polls (`git ls-remote` every `pull_interval`, clone only on a new sha); every `sync` also pulls. |
+| Writes | MCP `propose_annotation` + token-gated HTTP proposals route (merge patch, validated against the live catalog, one MR per proposal); rolling `ohmydb/drift` MR after sync adding stub files for unannotated tables only. The bot can't push to protected `main`. |
+| MCP auth | Same as M19: no app-level token on MCP; Pomerium + flag + MR review. |
+| Surfacing | `get_table`/GET entity: full annotation + per-column descriptions. Listings: `summary` + `status`, `q` searches summary. `get_schema_graph`: global/database hints. Frontend schema panel. |
+| Tooling | `ohmydb annotations validate DIR` (annotation repo CI), `ohmydb annotations schema` (JSON Schema for editors), sample tree in `seed/annotations/`. |
+
+Delivery as two PRs: **M23** read path (config, format + CLIs, seed,
+storage + migration, pull/poll, MCP/API/UI surfacing, git in the Docker
+image), then **M24** write path (proposals via MCP/HTTP, drift MR).
+
+Deferred (move to Backlog once M24 ships): GitHub/Gitea PR creation, a
+CI/webhook-triggered pull endpoint, Ossie export, reverse relationships or a
+join-path tool, column-level drift edits, ClickHouse table-level `COMMENT` as
+a fallback summary, sparse checkout for monorepos, annotation outcome in the
+`/api/sync` response, auto-sampled categorical values.
 
 ## Backlog
 
