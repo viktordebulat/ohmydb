@@ -87,6 +87,13 @@ header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
 .ref-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
 .ref-table td:first-child { white-space: nowrap; color: var(--ink-2); }
 .ref-table td:last-child { color: var(--ink); }
+.ref-details { margin-top: 14px; }
+.ref-details > summary { cursor: pointer; font-size: 13px; font-weight: 650; margin-bottom: 6px; }
+.ref-details > summary:hover { color: var(--accent); }
+.ref-pre {
+  margin: 8px 0; padding: 8px 10px; background: var(--page); border: 1px solid var(--grid);
+  border-radius: 6px; font-size: 11.5px; line-height: 1.45; color: var(--ink); overflow-x: auto;
+}
 select, input[type=text], button {
   padding: 5px 9px; border: 1px solid var(--grid); border-radius: 6px;
   background: var(--page); color: var(--ink); font: inherit; font-size: 12.5px;

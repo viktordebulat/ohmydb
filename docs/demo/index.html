@@ -76,6 +76,46 @@
           </tbody>
         </table>
       </section>
+      <section>
+        <details class="ref-details">
+          <summary>Annotation file schema</summary>
+          <p class="sub">Human-curated YAML in the annotation git repo (with <code>annotations.enabled</code> on), one file per table: <code>&lt;db&gt;/&lt;table&gt;.yaml</code>, path = identity. Every field optional; unknown keys are errors. Full reference: <code>docs/ANNOTATIONS.md</code>.</p>
+          <table class="ref-table">
+            <tbody>
+              <tr><td><code>description</code></td><td>What the table is. First line = <code>summary</code> in listings and search.</td></tr>
+              <tr><td><code>grain</code></td><td>What one row means, e.g. <code>one row per client event</code>.</td></tr>
+              <tr><td><code>status</code>, <code>use_instead</code></td><td><code>active</code> | <code>deprecated</code>; <code>db.table</code> to prefer instead.</td></tr>
+              <tr><td><code>owner</code></td><td>Owning team or person.</td></tr>
+              <tr><td><code>query_hints</code></td><td>List of gotchas: <code>FINAL</code>, sorting-key filters, units, dedup.</td></tr>
+              <tr><td><code>columns</code></td><td>Map by column name → <code>description</code>, <code>values</code> (enum meanings: map or list).</td></tr>
+              <tr><td><code>relationships</code></td><td>Join paths: <code>to</code> (<code>db.table</code>, same cluster), <code>from_columns</code>/<code>to_columns</code> (same length), optional <code>cardinality</code>, <code>description</code>.</td></tr>
+              <tr><td><code>examples</code></td><td>Verified <code>question</code> → <code>sql</code> pairs.</td></tr>
+              <tr><td><code>_global.yaml</code></td><td>Repo root: <code>version: 1</code>, <code>query_hints</code>, <code>ignore</code> (regexes on <code>db.table</code>, no drift stubs).</td></tr>
+              <tr><td><code>&lt;db&gt;/_database.yaml</code></td><td><code>description</code>, <code>query_hints</code> for the whole database.</td></tr>
+            </tbody>
+          </table>
+<pre class="ref-pre"># app/events.yaml
+description: |
+  Raw user interaction events from the web app.
+grain: one row per client event
+status: active
+query_hints:
+  - Always filter on ts (sorting key).
+columns:
+  ts: {description: "Event time, UTC"}
+  event_type:
+    values: {click: element click, view: page view}
+relationships:
+  - to: app.users
+    from_columns: [user_id]
+    to_columns: [id]
+    cardinality: many_to_one
+examples:
+  - question: Purchases per day, last 7 days
+    sql: SELECT toDate(ts) AS d, count() FROM app.events WHERE event_type = 'purchase' GROUP BY d</pre>
+          <p class="sub">Quote values containing <code>, </code> or <code>: </code> inside <code>{...}</code>. Proposals patch this shape: maps merge, lists replace whole, <code>null</code> deletes.</p>
+        </details>
+      </section>
     </div>
   </div>
 </div>
