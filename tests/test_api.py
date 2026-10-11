@@ -34,6 +34,15 @@ def test_graph(tmp_path):
     assert node["kind"] == "table" and "synced_at" not in node
 
 
+def test_graph_neighbors(tmp_path):
+    client = _client(tmp_path)
+    assert "upstream_ids" not in client.get("/api/graph/c1").json()["nodes"][0]  # opt-in
+    nodes = {n["name"]: n for n in client.get("/api/graph/c1?neighbors=true").json()["nodes"]}
+    # mv reads_from events: data flows events -> mv
+    assert nodes["mv"]["upstream_ids"] == [nodes["events"]["id"]] and nodes["mv"]["downstream_ids"] == []
+    assert nodes["events"]["downstream_ids"] == [nodes["mv"]["id"]] and nodes["events"]["upstream_ids"] == []
+
+
 def test_graph_scoped_to_cluster(tmp_path):
     url = f"sqlite:///{tmp_path}/test.sqlite"
     factory = make_session_factory(url)

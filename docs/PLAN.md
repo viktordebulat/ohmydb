@@ -382,6 +382,19 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
   starting with `.`/`_` are never written (load_tree would skip/reject
   them); drift only considers configured clusters; GitHub PRs (github.com
   only) added on request — the token doubles as the API Bearer token.
+- **M25 (2026-10-11)**: relation hops in the frontend. `graph_payload(...,
+  with_neighbors=True)` / `GET /api/graph/{cluster}?neighbors=true` adds
+  direct-neighbor ids per node (`upstream_ids`/`downstream_ids`, same
+  data-flow direction as `get_relations`, shared `_flow()` helper); MCP
+  unaffected. `app.js: reach()` walks them client-side (BFS, first-hop
+  "via" kept, cached per graph load), used by (1) label filter "match via":
+  self only (default, old behavior) / 1 hop / all hops, upstream /
+  downstream / both, each label row satisfied by the entity or any related
+  one, inherited labels shown as dashed chips with their source; (2)
+  relations view "1 hop | all hops" toggle: flat Upstream/Downstream
+  branches, indirect nodes dimmed with "via <neighbor>". The view no longer
+  fetches `/relations` — built from the graph payload, so the static demo
+  supports both modes (static hosting ignores `?direct=`).
 
 ### Annotation layer decision record (M23/M24)
 
@@ -444,9 +457,9 @@ this section flagged is tracked in Backlog below.
 
 ## Backlog
 
-- **Frontend: transitive/multi-entity graph view**: expand M14 beyond one
-  entity's direct relations — full filtered graph rendering, multi-hop
-  walks, or overlaying several entities at once. This is where the
+- **Frontend: transitive/multi-entity graph view**: M25 added a flat
+  all-hops list for one entity; still open: real nested lineage chains,
+  full filtered graph rendering, or overlaying several entities at once. This is where the
   mind-elixir tree-vs-DAG mismatch (see Planned section above) actually
   bites; needs the cross-link-overlay approach (or a different renderer)
   implemented, not just decided.

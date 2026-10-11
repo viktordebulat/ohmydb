@@ -100,9 +100,13 @@ def create_app(cfg: AppConfig) -> FastAPI:
         column_type: str | None = None,
         match: Literal["all", "any"] = "all",
         kind: str | None = None,
+        neighbors: bool = False,
     ) -> dict:
         with factory() as s:
-            return graph_payload(s, cluster, q, column, column_type, match, kind, with_annotations=ann.enabled)
+            return graph_payload(
+                s, cluster, q, column, column_type, match, kind,
+                with_annotations=ann.enabled, with_neighbors=neighbors,
+            )
 
     @api.get("/search")
     def search(

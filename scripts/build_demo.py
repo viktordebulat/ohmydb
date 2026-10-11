@@ -41,7 +41,8 @@ def build() -> None:
     entity_count = 0
     for cluster in clusters:
         c = quote(cluster, safe="")
-        graph_res = client.get(f"/api/graph/{c}")
+        # app.js always asks for ?neighbors=true (label hops, relations view)
+        graph_res = client.get(f"/api/graph/{c}", params={"neighbors": "true"})
         graph_res.raise_for_status()
         _write_json(api_dir / "graph" / c, graph_res)
 

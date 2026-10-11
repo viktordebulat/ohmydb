@@ -42,7 +42,7 @@ All paths below are under `/api`.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/clusters` | Configured cluster names. |
-| `GET` | `/api/graph/{cluster}?q=&column=&column_type=&match=&kind=` | Catalog nodes for one cluster + `synced_at`. Same no-edges shape as `get_schema_graph`. Optional filters, same semantics as `find_tables` (`column` repeatable). |
+| `GET` | `/api/graph/{cluster}?q=&column=&column_type=&match=&kind=&neighbors=` | Catalog nodes for one cluster + `synced_at`. Same no-edges shape as `get_schema_graph`. Optional filters, same semantics as `find_tables` (`column` repeatable). `neighbors=true` adds per-node `upstream_ids`/`downstream_ids` (direct neighbors by node `id`; the frontend walks hops with them). |
 | `GET` | `/api/search?q=&column=&column_type=&match=&kind=&cluster=` | Cross-cluster search, HTTP twin of `find_tables` → `{"nodes": [...]}`. At least one filter required (else `400`). E.g. `?column=user_id&column=ts&match=all`. |
 | `GET` | `/api/entities/{cluster}/{database}/{name}` | One entity in full. |
 | `GET` | `/api/entities/{cluster}/{database}/{name}/relations?direct=` | Upstream/downstream relations for an entity — transitive by default, 1-hop only when `direct=true`. |
@@ -75,10 +75,14 @@ A missing or wrong token gets `401`.
 
 `GET /` serves a small static page (`app/web/index.html`, no build step)
 for browsing the catalog: pick a cluster, filter entities by database/
-name/kind/engine/refreshable/labels, click one to see its direct
+name/kind/engine/refreshable/labels, click one to see its
 upstream/downstream relations as a mind map (via the vendored
 [mind-elixir](https://github.com/SSShooter/mind-elixir-core)). Click any
-node in the map to re-center on it.
+node in the map to re-center on it. Hops: the map shows direct neighbors
+(**1 hop**) or everything reachable (**all hops**, indirect nodes dimmed
+with the neighbor they come through); label filters can also **match via**
+related entities (1 hop / all hops, upstream / downstream / both), shown as
+dashed chips.
 
 ## Annotations
 

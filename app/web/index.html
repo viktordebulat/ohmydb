@@ -51,7 +51,7 @@
         <table class="ref-table">
           <tbody>
             <tr><td><code>GET /api/clusters</code></td><td>Configured cluster names.</td></tr>
-            <tr><td><code>GET /api/graph/{cluster}?q=&amp;column=&amp;column_type=&amp;match=&amp;kind=</code></td><td>Catalog nodes for one cluster (tables, views, materialized views, dictionaries, with labels). No edges. Optional <code>q</code>: substring match against name/database/labels (and annotation summary), or <code>key:value</code> for an exact label lookup. Column filters: same as <code>find_tables</code>. With annotations on: per-node <code>summary</code>/<code>status</code> and a top-level <code>annotations</code> hints block.</td></tr>
+            <tr><td><code>GET /api/graph/{cluster}?q=&amp;column=&amp;column_type=&amp;match=&amp;kind=&amp;neighbors=</code></td><td>Catalog nodes for one cluster (tables, views, materialized views, dictionaries, with labels). No edges. Optional <code>q</code>: substring match against name/database/labels (and annotation summary), or <code>key:value</code> for an exact label lookup. Column filters: same as <code>find_tables</code>. With annotations on: per-node <code>summary</code>/<code>status</code> and a top-level <code>annotations</code> hints block. <code>neighbors=true</code>: per-node <code>upstream_ids</code>/<code>downstream_ids</code> (direct neighbors by <code>id</code>).</td></tr>
             <tr><td><code>GET /api/search?q=&amp;column=&amp;column_type=&amp;match=&amp;kind=&amp;cluster=</code></td><td>Cross-cluster search, same filters as <code>find_tables</code> (<code>column</code> repeatable), at least one required.</td></tr>
             <tr><td><code>GET /api/entities/{cluster}/{database}/{name}</code></td><td>Full entity detail: columns with types/comments, raw DDL, engine, attrs, labels. With annotations on: <code>annotation</code> plus per-column <code>description</code>/<code>values</code>.</td></tr>
             <tr><td><code>GET /api/entities/{cluster}/{database}/{name}/relations?direct=</code></td><td>Transitive upstream (data sources) and downstream (consumers). <code>direct=true</code> limits to immediate 1-hop neighbors.</td></tr>
@@ -149,6 +149,19 @@ examples:
     <label>labels</label>
     <div id="label-rows"></div>
     <button id="label-add" type="button" title="Add another label filter — multiple rows are ANDed together.">+ label filter</button>
+    <div class="label-scope">
+      <span>match via</span>
+      <select id="f-label-hops" title="Also match labels of related entities: direct neighbors (1 hop) or everything reachable (all hops). Labels found that way show as dimmed chips.">
+        <option value="0">self only</option>
+        <option value="1">1 hop</option>
+        <option value="all">all hops</option>
+      </select>
+      <select id="f-label-dir" disabled title="Which related entities count: upstream = data sources (e.g. tables fed by a labeled source), downstream = consumers, or both.">
+        <option value="up">upstream</option>
+        <option value="down">downstream</option>
+        <option value="both">both</option>
+      </select>
+    </div>
   </div>
   <div class="field">
     <label>&nbsp;</label>
@@ -177,6 +190,10 @@ examples:
   <div id="relations">
     <div id="relations-title-bar">
       <div id="relations-title"></div>
+      <div id="hops-switch" class="seg-switch" role="group" aria-label="relation hops">
+        <button type="button" data-hops="1" class="active" title="Direct upstream/downstream neighbors only.">1 hop</button>
+        <button type="button" data-hops="all" title="Everything reachable upstream/downstream; indirect entities are dimmed and show which neighbor leads to them.">all hops</button>
+      </div>
       <button id="relations-close" type="button" title="close">×</button>
     </div>
     <div id="mindmap-area">
