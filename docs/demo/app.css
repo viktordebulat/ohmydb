@@ -50,13 +50,15 @@ header {
 }
 header h1 { font-size: 15px; margin: 0; font-weight: 650; }
 header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
-#theme-switch { display: flex; border: 1px solid var(--grid); border-radius: 6px; overflow: hidden; }
-#theme-switch button {
+#theme-switch, .seg-switch { display: flex; border: 1px solid var(--grid); border-radius: 6px; overflow: hidden; }
+#theme-switch button, .seg-switch button {
   border: 0; border-radius: 0; padding: 5px 9px; background: var(--page); color: var(--muted);
 }
-#theme-switch button + button { border-left: 1px solid var(--grid); }
-#theme-switch button:hover { background: var(--surface); color: var(--ink); }
-#theme-switch button.active { background: var(--border); color: var(--ink); }
+#theme-switch button + button, .seg-switch button + button { border-left: 1px solid var(--grid); }
+#theme-switch button:hover, .seg-switch button:hover { background: var(--surface); color: var(--ink); }
+#theme-switch button.active, .seg-switch button.active { background: var(--border); color: var(--ink); }
+#hops-switch { margin-left: auto; margin-right: 8px; flex-shrink: 0; }
+#hops-switch button { padding: 3px 8px; font-size: 12px; }
 #info-btn { border-radius: 999px; padding: 5px 9px; font-size: 13px; line-height: 1; }
 
 #info-overlay {
@@ -112,6 +114,8 @@ button:hover { border-color: var(--muted); }
 .label-row select { width: 110px; }
 .label-row input { width: 160px; }
 .label-row button { padding: 3px 8px; }
+.label-scope { display: flex; gap: 6px; align-items: center; margin-top: 6px; color: var(--muted); font-size: 12px; }
+.label-scope select:disabled { opacity: 0.5; }
 #label-add { padding: 3px 8px; }
 
 #split { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -132,6 +136,7 @@ tbody tr.selected { background: var(--border); }
   padding: 1px 7px; border: 1px solid var(--border); border-radius: 9px;
   font-size: 11px; color: var(--ink-2); background: var(--page);
 }
+.chip-via { border-style: dashed; color: var(--muted); }
 #status { color: var(--muted); font-size: 12px; padding: 4px 2px; }
 
 #split-handle {
@@ -236,4 +241,5 @@ tbody tr.selected { background: var(--border); }
 
 /* label lines injected into node topics (see nodeTopicHtml in app.js) */
 #mindmap .tpc-sub { font-size: 0.75em; opacity: 0.75; }
+#mindmap .tpc-dim { opacity: 0.6; }
 #mindmap .tpc-label { display: flex; align-items: center; gap: 4px; font-size: 0.7em; opacity: 0.9; margin-top: 2px; }

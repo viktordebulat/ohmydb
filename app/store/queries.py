@@ -2,6 +2,7 @@
 entity) are excluded from all reads but kept in the table."""
 
 import fnmatch
+from collections import defaultdict
 from collections.abc import Sequence
 
 from sqlalchemy import delete, or_, select
@@ -164,10 +165,14 @@ def graph_payload(
     kind: str | None = None,
     *,
     with_annotations: bool = False,
+    with_neighbors: bool = False,
 ) -> dict:
     # No edges list — redundant with per-entity upstream/downstream
     # (see get_relations); a caller wanting dependency direction for one
     # entity should call that instead of walking edges here.
+    # `with_neighbors` (frontend only): each node gains upstream_ids /
+    # downstream_ids, its direct (1-hop) neighbors by entity id, so the page
+    # can walk N hops client-side for label filters and the relations view.
     entities = session.scalars(select(EntityRow).where(EntityRow.cluster == cluster)).all()
     # One value for the whole graph, not per node — a sync writes the same
     # timestamp to every entity of a cluster in one transaction.
@@ -179,7 +184,27 @@ def graph_payload(
     }
     if with_annotations and (hints := _cluster_hints(session, cluster)):
         payload["annotations"] = hints
+    if with_neighbors:
+        up: dict[int, list[int]] = defaultdict(list)
+        down: dict[int, list[int]] = defaultdict(list)
+        edges = session.scalars(
+            select(EdgeRow).join(EntityRow, EdgeRow.src_id == EntityRow.id).where(EntityRow.cluster == cluster)
+        )
+        for edge in edges:
+            frm, to = _flow(edge)
+            down[frm].append(to)
+            up[to].append(frm)
+        for n in nodes:
+            n["upstream_ids"] = sorted(set(up[n["id"]]))
+            n["downstream_ids"] = sorted(set(down[n["id"]]))
     return payload
+
+
+def _flow(edge: EdgeRow) -> tuple[int, int]:
+    """(from, to) in data-flow direction, same convention as repo.py's
+    flow_out/flow_in: writes_to flows src->dst, reads_from/dict_source
+    flow dst->src."""
+    return (edge.src_id, edge.dst_id) if edge.kind == EdgeKind.WRITES_TO.value else (edge.dst_id, edge.src_id)
 
 
 def _cluster_hints(session: Session, cluster: str) -> dict:
@@ -285,16 +310,14 @@ def get_relations(
     if target is None:
         return None
 
-    # Direct (1-hop) neighbors: this entity's own edges, same direction
-    # convention as repo.py's flow_out/flow_in (writes_to flows src->dst,
-    # reads_from/dict_source flow dst->src).
+    # Direct (1-hop) neighbors: this entity's own edges (see _flow).
     direct_upstream: set[int] = set()
     direct_downstream: set[int] = set()
     own_edges = session.scalars(
         select(EdgeRow).where(or_(EdgeRow.src_id == target.id, EdgeRow.dst_id == target.id))
     ).all()
     for e in own_edges:
-        frm, to = (e.src_id, e.dst_id) if e.kind == EdgeKind.WRITES_TO.value else (e.dst_id, e.src_id)
+        frm, to = _flow(e)
         if frm == target.id:
             direct_downstream.add(to)
         if to == target.id:

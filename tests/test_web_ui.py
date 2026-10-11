@@ -45,7 +45,7 @@ ANNOTATION_DESC = "<b>raw</b> events"  # markup must render as text, not HTML
 @pytest.fixture
 def live_server(tmp_path):
     """A real HTTP server (browsers can't navigate to TestClient) seeded
-    with one table read by one materialized view."""
+    with a chain: table events -> materialized view mv -> table agg."""
     url = f"sqlite:///{tmp_path}/test.sqlite"
     factory = make_session_factory(url)
     with factory() as s:
@@ -55,8 +55,12 @@ def live_server(tmp_path):
             [
                 Entity(cluster="c1", database="app", name="events", kind=EntityKind.TABLE, engine="MergeTree"),
                 Entity(cluster="c1", database="analytics", name="mv", kind=EntityKind.MAT_VIEW),
+                Entity(cluster="c1", database="analytics", name="agg", kind=EntityKind.TABLE),
             ],
-            [Edge(("c1", "analytics", "mv"), ("c1", "app", "events"), EdgeKind.READS_FROM)],
+            [
+                Edge(("c1", "analytics", "mv"), ("c1", "app", "events"), EdgeKind.READS_FROM),
+                Edge(("c1", "analytics", "mv"), ("c1", "analytics", "agg"), EdgeKind.WRITES_TO),
+            ],
         )
         set_label(s, "c1", "app", "events", LABEL_KEY, LABEL_VALUE)
         replace_annotations(s, [{
@@ -93,7 +97,7 @@ def test_table_renders_seeded_entities(live_server):
         page.goto(live_server)
         page.wait_for_selector("#rows tr")
         names = page.locator("#rows tr td:first-child").all_text_contents()
-        assert set(names) == {"events", "mv"}
+        assert set(names) == {"events", "mv", "agg"}
         browser.close()
 
 
@@ -137,11 +141,12 @@ def test_row_click_renders_relations_tree(live_server):
         branch_topics = page.locator(
             "#mindmap me-main > me-wrapper > me-parent > me-tpc .text"
         ).all_text_contents()
-        assert branch_topics == ["Upstream (1)", "Downstream (0)"]
+        assert branch_topics == ["Upstream (1)", "Downstream (1)"]
 
         # "events" (the upstream leaf) shows the label's value only (key is
         # conveyed by the swatch color / legend, not repeated on the node)
         events_label = page.locator("#mindmap me-children .tpc-label")
+        assert events_label.count() == 1  # agg (downstream) has no labels
         assert events_label.text_content().strip() == LABEL_VALUE
         assert events_label.get_attribute("title") == LABEL_KEY
 
@@ -166,4 +171,40 @@ def test_schema_panel_renders_annotation(live_server):
         # grain/owner not declared in the fixture's doc -> not rendered at all
         assert page.locator("#schema-body .ann-key").count() == 0
         assert "grain" not in page.text_content("#schema-body")
+        browser.close()
+
+
+def test_label_filter_and_relations_through_hops(live_server):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(live_server)
+        page.wait_for_selector("#rows tr")
+        names = lambda: sorted(page.locator("#rows tr td:first-child").all_text_contents())  # noqa: E731
+
+        page.click("#label-add")
+        page.select_option(".label-row select", LABEL_KEY)
+        assert names() == ["events"]  # self only (default)
+        page.select_option("#f-label-hops", "1")  # direction defaults to upstream
+        assert names() == ["events", "mv"]
+        page.select_option("#f-label-hops", "all")
+        assert names() == ["agg", "events", "mv"]
+        via = page.locator('#rows tr:has(td:text-is("agg")) .chip-via')
+        assert via.text_content() == f"{LABEL_KEY}:{LABEL_VALUE}"
+        assert via.get_attribute("title") == "via app.events"
+        page.select_option("#f-label-dir", "down")  # nothing downstream of agg/mv carries it
+        assert names() == ["events"]
+
+        page.click("#filters-clear")
+        page.click('#rows tr:has(td:text-is("agg"))')
+        page.wait_for_selector("#mindmap me-root")
+        branches = "#mindmap me-main > me-wrapper > me-parent > me-tpc .text"
+        assert page.locator(branches).all_text_contents() == ["Upstream (1)", "Downstream (0)"]
+        page.click('#hops-switch button[data-hops="all"]')
+        page.wait_for_function(
+            "document.querySelector('#mindmap me-main me-parent me-tpc .text').textContent === 'Upstream (2)'")
+        assert page.locator("#mindmap .tpc-dim").all_text_contents() == ["events"]  # indirect
+        assert "via mv" in page.locator("#mindmap me-children").first.text_content()
         browser.close()

@@ -10,6 +10,7 @@ const browsePaneEl = document.getElementById('browse-pane');
 const splitHandleEl = document.getElementById('split-handle');
 const relationsTitleEl = document.getElementById('relations-title');
 const relationsCloseBtn = document.getElementById('relations-close');
+const hopsSwitchEl = document.getElementById('hops-switch');
 const mindmapEl = document.getElementById('mindmap');
 const mindmapAreaEl = document.getElementById('mindmap-area');
 const legendEl = document.getElementById('legend');
@@ -32,8 +33,12 @@ const fRefreshable = document.getElementById('f-refreshable');
 const labelRowsEl = document.getElementById('label-rows');
 const labelAddBtn = document.getElementById('label-add');
 const filtersClearBtn = document.getElementById('filters-clear');
+const fLabelHops = document.getElementById('f-label-hops');
+const fLabelDir = document.getElementById('f-label-dir');
 
 let nodes = [];
+let byId = new Map(); // entity id -> node (graph payload, with upstream_ids/downstream_ids)
+let reachCache = new Map();
 let labelFilters = []; // [{keySelect, valueInput, datalist}]
 let sortKey = null;
 let sortDir = 1; // 1 = asc, -1 = desc
@@ -62,12 +67,14 @@ async function loadGraph(cluster) {
   statusEl.textContent = 'loading…';
   let payload;
   try {
-    payload = await fetchJson(`api/graph/${encodeURIComponent(cluster)}`);
+    payload = await fetchJson(`api/graph/${encodeURIComponent(cluster)}?neighbors=true`);
   } catch (e) {
     statusEl.textContent = `failed to load catalog (${e.message}) — press reload`;
     return;
   }
   nodes = payload.nodes;
+  byId = new Map(nodes.map(n => [n.id, n]));
+  reachCache = new Map();
   syncedAtEl.textContent = payload.synced_at ? `synced ${payload.synced_at}` : 'never synced';
   populateDistinct(fDatabase, nodes.map(n => n.database));
   refreshLabelKeyOptions();
@@ -141,6 +148,47 @@ function updateLabelValueOptions(entry) {
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
 
+// Entities reachable from `id` along data flow ('up' = sources, 'down' =
+// consumers), at most `maxHops` hops (1 or Infinity), walked client-side over
+// the graph payload's direct-neighbor ids. Returns Map(id -> first hop on a
+// shortest path), so callers can tell direct neighbors (id === via) from
+// indirect ones and say which neighbor leads there. Cached per graph load.
+function reach(id, dir, maxHops) {
+  const key = `${id}|${dir}|${maxHops}`;
+  if (reachCache.has(key)) return reachCache.get(key);
+  const step = (n) => (dir === 'up' ? n.upstream_ids : n.downstream_ids) || [];
+  const out = new Map();
+  let frontier = step(byId.get(id) || {}).map(n => [n, n]);
+  for (let hop = 1; frontier.length && hop <= maxHops; hop++) {
+    const next = [];
+    for (const [nid, via] of frontier) {
+      if (nid === id || out.has(nid)) continue;
+      out.set(nid, via);
+      for (const m of step(byId.get(nid) || {})) next.push([m, via]);
+    }
+    frontier = next;
+  }
+  reachCache.set(key, out);
+  return out;
+}
+
+const hopsValue = (v) => (v === 'all' ? Infinity : Number(v));
+
+// Related entities whose labels also count for the label filter, per the
+// "match via" controls (none when set to self only).
+function labelSources(node) {
+  const hops = hopsValue(fLabelHops.value);
+  if (!hops) return [];
+  const dirs = fLabelDir.value === 'both' ? ['up', 'down'] : [fLabelDir.value];
+  const ids = new Set(dirs.flatMap(d => [...reach(node.id, d, hops).keys()]));
+  return [...ids].map(i => byId.get(i)).filter(Boolean);
+}
+
+function labelHit(labels, key, wanted) {
+  const v = labels[key];
+  return v !== undefined && (!wanted.length || wanted.includes(v.toLowerCase()));
+}
+
 // `exclude` lets a facet's own dropdown compute its options against every
 // OTHER filter without also filtering on itself (see updateFacetOptions).
 function matches(node, exclude) {
@@ -149,15 +197,33 @@ function matches(node, exclude) {
   if (exclude !== 'kind' && fKind.value && node.kind !== fKind.value) return false;
   if (exclude !== 'engine' && fEngine.value && node.engine !== fEngine.value) return false;
   if (fRefreshable.value && String(node.refreshable) !== fRefreshable.value) return false;
+  // Each row may be satisfied by the entity itself or (with "match via")
+  // by a different related entity; rows are still ANDed.
+  let sources = null;
   for (const { keySelect, valueInput } of labelFilters) {
     const k = keySelect.value;
     if (!k) continue;
-    const labelValue = node.labels[k];
-    if (labelValue === undefined) return false; // key chosen, entity doesn't have it
     const wanted = valueInput.value.trim().split('|').map(s => s.trim().toLowerCase()).filter(Boolean);
-    if (wanted.length && !wanted.includes(labelValue.toLowerCase())) return false;
+    if (labelHit(node.labels, k, wanted)) continue;
+    sources ??= labelSources(node);
+    if (!sources.some(s => labelHit(s.labels, k, wanted))) return false;
   }
   return true;
+}
+
+// Labels a row matched through related entities (only for keys used in
+// label filters, and not already on the entity): shown as dimmed chips.
+function inheritedChips(node) {
+  const keys = new Set(labelFilters.map(f => f.keySelect.value).filter(Boolean));
+  if (!keys.size || !hopsValue(fLabelHops.value)) return '';
+  const seen = new Map(); // "k:v" -> first source
+  for (const s of labelSources(node)) {
+    for (const [k, v] of Object.entries(s.labels)) {
+      if (keys.has(k) && node.labels[k] !== v && !seen.has(`${k}:${v}`)) seen.set(`${k}:${v}`, s);
+    }
+  }
+  return [...seen].map(([kv, s]) =>
+    `<span class="chip chip-via" title="via ${escapeHtml(s.database)}.${escapeHtml(s.name)}">${escapeHtml(kv)}</span>`).join('');
 }
 
 function sortValue(n, key) {
@@ -190,7 +256,7 @@ function render() {
       <td>${escapeHtml(n.kind)}</td>
       <td>${escapeHtml(n.engine || '')}</td>
       <td>${n.refreshable ? 'yes' : ''}</td>
-      <td>${Object.entries(n.labels).map(([k, v]) => `<span class="chip">${escapeHtml(k)}:${escapeHtml(v)}</span>`).join('')}</td>
+      <td>${Object.entries(n.labels).map(([k, v]) => `<span class="chip">${escapeHtml(k)}:${escapeHtml(v)}</span>`).join('')}${inheritedChips(n)}</td>
     </tr>`).join('');
 }
 
@@ -235,10 +301,14 @@ function labelColor(key) {
 // Identity is carried by the swatch, not by coloring the text itself (text
 // stays in normal ink) — keeps label rows legible for colorblind readers.
 function nodeTopicHtml(e) {
+  // Indirect entities (all-hops view) are dimmed and say which direct
+  // neighbor leads to them.
+  const dim = e.via ? ' class="tpc-dim"' : '';
   const lines = [
-    `<div>${escapeHtml(e.name)}</div>`,
+    `<div${dim}>${escapeHtml(e.name)}</div>`,
     `<div class="tpc-sub">${escapeHtml(e.database)}${e.engine ? ' · ' + escapeHtml(e.engine) : ''}</div>`,
   ];
+  if (e.via) lines.push(`<div class="tpc-sub">via ${escapeHtml(e.via)}</div>`);
   // Key isn't repeated here — the swatch color is the key (see the legend);
   // the node only needs to show the value.
   for (const [k, v] of Object.entries(e.labels || {})) {
@@ -330,22 +400,31 @@ function renderTree(cluster, database, name, rel) {
   requestAnimationFrame(() => mind.toCenter());
 }
 
-async function showRelations(cluster, database, name) {
+let vizHops = 1; // relations view: 1 = direct neighbors, Infinity = all reachable
+
+// Built from the graph payload's neighbor ids (see reach), not fetched —
+// works the same against the static demo snapshot.
+function relationsOf(node) {
+  const side = (dir) => [...reach(node.id, dir, vizHops)]
+    .map(([id, via]) => ({ ...byId.get(id), via: id === via ? null : byId.get(via).name }))
+    .sort((a, b) => (!!a.via - !!b.via) || a.database.localeCompare(b.database) || a.name.localeCompare(b.name));
+  return { entity: node, upstream: side('up'), downstream: side('down') };
+}
+
+function showRelations(cluster, database, name) {
   splitEl.classList.add('relations-open');
-  relationsTitleEl.textContent = `loading relations for ${cluster}/${database}/${name}…`;
-  const entityUrl = entityApiUrl(cluster, database, name);
-  const res = await fetch(`${entityUrl}/relations?direct=true`);
-  if (!res.ok) {
+  const node = nodes.find(n => n.database === database && n.name === name);
+  if (!node) {
     relationsTitleEl.textContent = `no relations found for ${cluster}/${database}/${name}`;
     return;
   }
-  const rel = await res.json();
+  const entityUrl = entityApiUrl(cluster, database, name);
   relationsTitleEl.innerHTML =
     `${escapeHtml(cluster)}/${escapeHtml(database)}/${escapeHtml(name)} — ` +
     `<a href="${entityUrl}" target="_blank" rel="noopener">API table</a> · ` +
-    `<a href="${entityUrl}/relations?direct=true" target="_blank" rel="noopener">relations</a> ` +
+    `<a href="${entityUrl}/relations?direct=${vizHops === 1}" target="_blank" rel="noopener">relations</a> ` +
     `(click a node to re-center)`;
-  renderTree(cluster, database, name, rel);
+  renderTree(cluster, database, name, relationsOf(node));
 }
 
 let lastSchemaDdl = '';
@@ -497,6 +576,18 @@ rowsEl.addEventListener('click', (e) => {
 });
 
 relationsCloseBtn.addEventListener('click', closeRelations);
+hopsSwitchEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  vizHops = hopsValue(btn.dataset.hops);
+  hopsSwitchEl.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+  if (lastRel) showRelations(lastRel.cluster, lastRel.database, lastRel.name);
+});
+fLabelHops.addEventListener('input', () => {
+  fLabelDir.disabled = !hopsValue(fLabelHops.value);
+  render();
+});
+fLabelDir.addEventListener('input', render);
 clusterSel.addEventListener('change', () => loadGraph(clusterSel.value));
 reloadBtn.addEventListener('click', () => (clusterSel.value ? loadGraph(clusterSel.value) : loadClusters()));
 [fDatabase, fName, fKind, fEngine, fRefreshable].forEach(el =>
@@ -510,6 +601,9 @@ filtersClearBtn.addEventListener('click', () => {
   fRefreshable.value = '';
   labelRowsEl.innerHTML = '';
   labelFilters = [];
+  fLabelHops.value = '0';
+  fLabelDir.value = 'up';
+  fLabelDir.disabled = true;
   render();
 });
 
