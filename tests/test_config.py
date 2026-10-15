@@ -104,6 +104,7 @@ def test_annotations_token_from_env_only(tmp_path, monkeypatch):
     ("  repo: ssh://git.example.com/a.git\n", "unsupported scheme"),
     ("  repo: some/dir\n  proposals: true\n", "git remote"),
     ("  repo: some/dir\n  cluster_paths: {nope: x}\n", "unknown cluster"),
+    ('  repo: some/dir\n  path: "a/{cluster}"\n  cluster_paths: {prod: x}\n', "mutually exclusive"),
     ("  repo: some/dir\n  pull_interval: -1\n", ">= 0"),
     ("  repo: some/dir\n  token: x\n", "OHMYDB_ANNOTATIONS_TOKEN"),
     ("  repo: some/dir\n  author: ohmydb\n", "Name <email>"),

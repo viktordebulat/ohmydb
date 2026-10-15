@@ -40,6 +40,7 @@ annotations:
   # repo: https://gitlab.example.com/data/schema-annotations.git
   # ref: main                 # branch to read
   # path: ""                  # shared root inside the repo
+  # path: "anno/{cluster}"    # or per-cluster roots: no shared root/fallback, excl. cluster_paths
   # cluster_paths: {}         # {cluster: root} override; missing files fall back to `path`
   # pull_interval: 300
   # Write back via merge/pull requests only (GitLab, or github.com; needs a git

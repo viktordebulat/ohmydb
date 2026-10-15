@@ -89,6 +89,14 @@ taken from the shared root (this applies to `_global.yaml` and
 `path: ""` with `cluster_paths: {prod: clusters/prod}`; the shared scan then
 skips the `clusters/` dir. Don't name a database like such a dir.
 
+**Per-cluster mode**: put `{cluster}` in `path` (e.g. `path: "anno/{cluster}"`)
+to give every cluster its own root, `anno/<cluster>/<db>/<table>.yaml`, with
+**no shared root and no fallback**: each cluster reads its own `_global.yaml`,
+`_database.yaml` and table files only, and drift stubs and new proposal files
+land in that cluster's root. A cluster with no dir yet reads as unannotated
+(reported in the pull errors; drift creates it). Can't be combined with
+`cluster_paths`.
+
 ## Config
 
 ```yaml
@@ -96,7 +104,7 @@ annotations:
   enabled: false            # master flag; false = fully inert
   repo: https://gitlab.example.com/data/schema-annotations.git   # or a local dir
   ref: main                 # branch to read
-  path: ""                  # shared root inside the repo/dir
+  path: ""                  # shared root inside the repo/dir; "anno/{cluster}" = per-cluster mode
   cluster_paths: {}         # {cluster: root}, falls back to `path` per file
   pull_interval: 300        # serve only, seconds; 0 = no polling
   proposals: false          # MCP propose_annotation + HTTP proposals route
@@ -107,7 +115,8 @@ annotations:
 `repo`: `https://` or `file://` = git remote; no `://` = local directory, read
 as-is (handy for local dev; `config.example.yaml` points at
 `seed/annotations`). Any other scheme, credentials in the URL, an unknown
-`cluster_paths` cluster, a negative `pull_interval`, `proposals`/`drift_mr`
+`cluster_paths` cluster, `{cluster}` in `path` together with `cluster_paths`,
+a negative `pull_interval`, `proposals`/`drift_mr`
 with a local dir, or an `author` that isn't `Name <email>` fail config load.
 
 Token: env `OHMYDB_ANNOTATIONS_TOKEN` only (empty = unset). A `token:` key in
@@ -172,7 +181,7 @@ app-level auth (guard `/mcp` at the proxy).
    be non-empty, and the names must be usable as a file path.
 2. A fresh clone; the target is the file in effect for that cluster: its
    `cluster_paths` override if one exists, else the shared file, else a new
-   shared file.
+   shared file. In per-cluster mode always the cluster's own file.
 3. `patch` is an [RFC 7386](https://www.rfc-editor.org/rfc/rfc7386) JSON
    merge patch: maps merge key by key, lists (hints, relationships,
    examples) are replaced whole, `null` deletes. The file is edited
@@ -276,10 +285,12 @@ not `annotations pull`), from the same clone as the pull:
 
 - A stub is needed for each catalog table (any kind but `external`) with no
   file in its cluster's override root or the shared root, not matched by
-  `ignore` in the shared `_global.yaml`. Files are checked on disk, so a
+  `ignore` in the `_global.yaml` in effect for that cluster (same fallback
+  as reads). Files are checked on disk, so a
   file with errors still counts as present. Names starting with `.` or `_`
   are skipped.
-- Stubs go into the shared root: a header comment, `description: ""`,
+- Stubs go into the shared root (per-cluster mode: one per cluster, into
+  each cluster's root): a header comment, `description: ""`,
   `grain: ""` and every column with `description: ""`. An unfilled stub
   reads as unannotated.
 - One rolling branch, `ohmydb/drift`, rebuilt from `ref` each time and
@@ -298,6 +309,7 @@ drift failure is reported (`drift=failed ...`) and doesn't undo the pull.
 ohmydb annotations validate annotations/            # exit 1 + file: key: message on any error
 ohmydb annotations validate . --exclude clusters    # shared root holding override roots
 ohmydb annotations validate clusters/prod           # each override root separately
+ohmydb annotations validate anno/prod               # per-cluster mode: each cluster root
 ohmydb annotations schema > annotations.schema.json # also: schema database|global
 ```
 

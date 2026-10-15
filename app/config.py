@@ -62,7 +62,10 @@ class AnnotationsConfig:
     # local directory, read as-is (read-only, no git needed).
     repo: str = ""
     ref: str = "main"  # branch read + MR target
-    path: str = ""  # shared root inside the repo/dir
+    # Shared root inside the repo/dir. With a "{cluster}" placeholder (e.g.
+    # "anno/{cluster}") every cluster gets its own root instead: no shared
+    # root, no fallback, writes land there too. Excludes cluster_paths.
+    path: str = ""
     # {cluster: root} per-cluster override root; a file missing there falls
     # back to the same file under `path`.
     cluster_paths: dict[str, str] = field(default_factory=dict)
@@ -79,6 +82,17 @@ class AnnotationsConfig:
     @property
     def is_local(self) -> bool:
         return "://" not in self.repo
+
+    @property
+    def per_cluster(self) -> bool:
+        return "{cluster}" in self.path
+
+    def root_for(self, cluster: str) -> str:
+        """The annotation root in effect for `cluster` (shared mode: its
+        override root, else the shared one)."""
+        if self.per_cluster:
+            return self.path.replace("{cluster}", cluster)
+        return self.cluster_paths.get(cluster, self.path)
 
 
 @dataclass
@@ -135,6 +149,8 @@ def _load_annotations(raw: dict, clusters: list[ClusterConfig]) -> AnnotationsCo
     unknown = set(a.cluster_paths) - {c.name for c in clusters}
     if unknown:
         raise ValueError(f"annotations.cluster_paths: unknown cluster(s) {sorted(unknown)}")
+    if a.per_cluster and a.cluster_paths:
+        raise ValueError("annotations.path with {cluster} and cluster_paths are mutually exclusive")
     if a.pull_interval < 0:
         raise ValueError("annotations.pull_interval must be >= 0")
     if "@" not in parseaddr(a.author)[1]:

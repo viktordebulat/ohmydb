@@ -197,6 +197,18 @@ def test_mcp_columns(pulled):
     assert "summary" not in found["columns"]
 
 
+def test_per_cluster_roots_no_fallback(tmp_path):
+    url, factory = _catalog(tmp_path)
+    repo = _tree(tmp_path / "repo", {"anno/c1/app/events.yaml": "description: c1 events\n"})  # no anno/c2 yet
+    cfg = _cfg(url, repo, path="anno/{cluster}")
+    assert cfg.annotations.root_for("c2") == "anno/c2"
+    result = pull(cfg, factory)
+    assert result["files"] == 1 and result["errors"] == ["anno/c2: cluster root not found (no annotations for it)"]
+    client = TestClient(create_app(cfg))
+    assert client.get("/api/entities/c1/app/events").json()["annotation"]["description"] == "c1 events"
+    assert "annotation" not in client.get("/api/entities/c2/app/events").json()  # c1's file doesn't leak
+
+
 def test_fatal_pull_keeps_last_good_copy(pulled):
     url, repo, cfg = pulled
     (repo / "_global.yaml").write_text("version: 2\n")
@@ -326,6 +338,16 @@ def test_proposals_off_or_unauthorized(tmp_path):
     assert "propose_annotation" in asyncio.run(tools(on))
     on.auth_token = "s3cr3t"
     assert TestClient(create_app(on)).post(path, json=body).status_code == 401
+
+
+@needs_git
+def test_drift_per_cluster_stubs(tmp_path, remote):
+    url, factory = _catalog(tmp_path)
+    cfg = _cfg(url, f"file://{remote}", drift_mr=True, path="anno/{cluster}")
+    drift = sync_annotations(cfg, factory)["drift"]
+    assert drift["status"] == "pushed" and drift["tables"] == 3
+    files = _git("ls-tree", "-r", "--name-only", "ohmydb/drift", "anno", cwd=remote).split()
+    assert files == ["anno/c1/app/events.yaml", "anno/c1/app/users.yaml", "anno/c2/app/events.yaml"]
 
 
 @needs_git
