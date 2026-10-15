@@ -58,13 +58,32 @@ def remote_version(cfg: AppConfig) -> str:
     return gitrepo.ls_remote(a.repo, a.ref, a.token)
 
 
-def _load_trees(a: AnnotationsConfig, workdir: Path) -> tuple[dict[str, Tree], list[str]]:
-    """Shared root + each distinct override root. Entry paths are rewritten
-    to be repo-relative (root prefix included)."""
+def _root(path: str) -> str:
+    return str(PurePosixPath(path))
+
+
+def _roots_for(a: AnnotationsConfig, cluster: str) -> set[str]:
+    """Roots a cluster's files may come from: its own, plus the shared
+    fallback unless in per-cluster mode."""
+    return {a.root_for(cluster)} if a.per_cluster else {a.root_for(cluster), a.path}
+
+
+def _load_trees(cfg: AppConfig, workdir: Path) -> tuple[dict[str, Tree], list[str]]:
+    """Shared root + each distinct cluster root. Entry paths are rewritten
+    to be repo-relative (root prefix included). Per-cluster mode: a cluster
+    without a dir yet reads as empty (drift creates it) and is reported as
+    an error, not fatal, so a typo'd `path` still shows up."""
+    a = cfg.annotations
     trees: dict[str, Tree] = {}
     errors: list[str] = []
-    roots = {str(PurePosixPath(r)) for r in (a.path, *a.cluster_paths.values())}
+    roots = {_root(a.root_for(c.name)) for c in cfg.clusters}
+    if not a.per_cluster:
+        roots.add(_root(a.path))
     for root in sorted(roots):
+        if a.per_cluster and not (workdir / root).is_dir():
+            trees[root] = Tree()
+            errors.append(f"{root}: cluster root not found (no annotations for it)")
+            continue
         # An override root nested inside this one (e.g. shared "" holding
         # clusters/prod) is not a database dir here.
         nested = frozenset(
@@ -91,10 +110,10 @@ def _rows(cfg: AppConfig, trees: dict[str, Tree]) -> list[dict]:
     override root wins over the same file in the shared root. One row per
     non-empty doc (an unfilled stub reads as unannotated)."""
     a = cfg.annotations
-    shared = trees[str(PurePosixPath(a.path))]
+    shared = trees.get(_root(a.path), Tree())  # per-cluster mode: none, no fallback
     rows = []
     for c in cfg.clusters:
-        override = trees[str(PurePosixPath(a.cluster_paths.get(c.name, a.path)))]
+        override = trees[_root(a.root_for(c.name))]
         entries = []
         if g := override.global_ or shared.global_:
             entries.append(("", "", g))
@@ -123,7 +142,7 @@ def _checkout(a: AnnotationsConfig) -> Iterator[tuple[Path, str]]:
 
 
 def _store(cfg: AppConfig, factory: sessionmaker[Session], workdir: Path, sha: str) -> tuple[dict, dict[str, Tree]]:
-    trees, errors = _load_trees(cfg.annotations, workdir)
+    trees, errors = _load_trees(cfg, workdir)
     with factory() as s:
         replace_annotations(s, _rows(cfg, trees), sha)
     files = sum(len(t.tables) + len(t.databases) + bool(t.global_) for t in trees.values())
@@ -193,17 +212,14 @@ def _safe_name(name: str) -> bool:
     return bool(name) and not _BAD_NAME_CHARS.search(name) and name[0] not in "._"
 
 
-def _root(path: str) -> str:
-    return str(PurePosixPath(path))
-
-
 def _fyi(cfg: AppConfig, trees: dict[str, Tree], catalog: dict) -> list[str]:
     """Drift MR description extras: annotation files whose table is gone and
     annotated columns that no longer exist. Reported only, never edited."""
     a = cfg.annotations
     lines = []
     for root, tree in trees.items():
-        served = [c.name for c in cfg.clusters if root in (_root(a.path), _root(a.cluster_paths.get(c.name, a.path)))]
+        shared = not a.per_cluster and root == _root(a.path)
+        served = [c.name for c in cfg.clusters if shared or root == _root(a.root_for(c.name))]
         for (db, name), (doc, path) in sorted(tree.tables.items()):
             hits = [catalog[(c, db, name)] for c in served if catalog.get((c, db, name), ("external",))[0] != "external"]
             if not hits:
@@ -214,30 +230,34 @@ def _fyi(cfg: AppConfig, trees: dict[str, Tree], catalog: dict) -> list[str]:
 
 
 def _drift(cfg: AppConfig, factory: sessionmaker[Session], workdir: Path, trees: dict[str, Tree]) -> dict:
-    """Rolling MR on DRIFT_BRANCH adding stub files (shared root) for catalog
-    tables that have no annotation file anywhere — new tables only, existing
-    files are never touched. Skipped when a human pushed to the branch."""
+    """Rolling MR on DRIFT_BRANCH adding stub files for catalog tables that
+    have no annotation file anywhere — new tables only, existing files are
+    never touched. Stubs go to the shared root (per-cluster mode: each
+    cluster's root). Skipped when a human pushed to the branch."""
     a = cfg.annotations
     with factory() as s:
         catalog = catalog_columns(s)
-    shared = trees[_root(a.path)]
-    if shared.global_ is None and (workdir / a.path / "_global.yaml").is_file():
-        return {"status": "skipped", "detail": "_global.yaml has errors (its ignore list is unknown)"}
-    ignore = [re.compile(p) for p in (shared.global_ or ({}, ""))[0].get("ignore", [])]
+    shared = trees.get(_root(a.path), Tree())
+    # `ignore` resolves like reads: the cluster's _global.yaml, else the shared one.
+    ignore: dict[str, list[re.Pattern]] = {}
+    for c in cfg.clusters:
+        g = trees[_root(a.root_for(c.name))].global_ or shared.global_
+        if g is None and any((workdir / r / "_global.yaml").is_file() for r in _roots_for(a, c.name)):
+            return {"status": "skipped", "detail": "_global.yaml has errors (its ignore list is unknown)"}
+        ignore[c.name] = [re.compile(p) for p in (g or ({}, ""))[0].get("ignore", [])]
 
-    configured = {c.name for c in cfg.clusters}
-    stubs: dict[tuple[str, str], list[str]] = {}
+    stubs: dict[tuple[str, str, str], tuple[str, list[str]]] = {}
     for (cluster, db, name), (kind, columns) in sorted(catalog.items()):
-        if cluster not in configured or kind == "external" or not (_safe_name(db) and _safe_name(name)):
+        if cluster not in ignore or kind == "external" or not (_safe_name(db) and _safe_name(name)):
             continue
-        if any(p.search(f"{db}.{name}") for p in ignore):
+        if any(p.search(f"{db}.{name}") for p in ignore[cluster]):
             continue
         # On disk, not the parsed tree: a file with errors still exists and
         # must not be overwritten by a stub.
-        roots = {a.path, a.cluster_paths.get(cluster, a.path)}
-        if any((workdir / r / db / f"{name}.yaml").exists() for r in roots):
+        if any((workdir / r / db / f"{name}.yaml").exists() for r in _roots_for(a, cluster)):
             continue
-        stubs.setdefault((db, name), columns)
+        target = a.root_for(cluster) if a.per_cluster else a.path
+        stubs.setdefault((target, db, name), (cluster, columns))
     if not stubs:
         return {"status": "none"}
 
@@ -247,11 +267,11 @@ def _drift(cfg: AppConfig, factory: sessionmaker[Session], workdir: Path, trees:
         if gitrepo.head_author_email(workdir, "FETCH_HEAD") != parseaddr(a.author)[1]:
             return {"status": "skipped", "detail": f"{DRIFT_BRANCH} has commits by someone else"}
 
-    for (db, name), columns in stubs.items():
-        path = workdir / a.path / db / f"{name}.yaml"
+    for (target, db, name), (_, columns) in stubs.items():
+        path = workdir / target / db / f"{name}.yaml"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(render_stub(db, name, columns))
-    tables = [f"{db}.{name}" for db, name in stubs]
+    tables = [f"{db}.{name}" + (f" ({cluster})" if a.per_cluster else "") for (_, db, name), (cluster, _) in stubs.items()]
     gitrepo.commit(workdir, f"annotations: stubs for {len(tables)} new table(s)\n\n" + "\n".join(tables), a.author)
     if seen is not None and gitrepo.rev_parse(workdir, "FETCH_HEAD^{tree}") == gitrepo.rev_parse(workdir, "HEAD^{tree}"):
         return {"status": "unchanged", "tables": len(tables)}
@@ -323,9 +343,9 @@ def propose(cfg: AppConfig, factory: sessionmaker[Session], cluster: str, databa
     with TemporaryDirectory(prefix="ohmydb-annotations-") as tmp:
         workdir = Path(tmp)
         gitrepo.clone(a.repo, a.ref, workdir, a.token)
-        override = a.cluster_paths.get(cluster)
-        if override is not None and (workdir / override / rel_in_root).is_file():
-            rel = str(PurePosixPath(override) / rel_in_root)
+        root = a.root_for(cluster)
+        if a.per_cluster or (workdir / root / rel_in_root).is_file():
+            rel = str(PurePosixPath(root) / rel_in_root)
         else:
             rel = str(PurePosixPath(a.path) / rel_in_root)
         path = workdir / rel
