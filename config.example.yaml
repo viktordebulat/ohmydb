@@ -47,7 +47,7 @@ annotations:
   # remote and a write token, see docs/ANNOTATIONS.md; protect `ref` so the
   # bot can only open MRs/PRs):
   # proposals: true           # MCP propose_annotation + POST /api/annotations/.../proposals
-  # drift_mr: true            # after sync: rolling MR adding stubs for new tables
+  # drift_mr: true            # after sync: rolling MR adding stubs for new tables, removing orphan files
   # author: "ohmydb <ohmydb@noreply.invalid>"   # bot commit identity
 
 # Credential env precedence per cluster (highest wins):

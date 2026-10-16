@@ -71,7 +71,7 @@ class AnnotationsConfig:
     cluster_paths: dict[str, str] = field(default_factory=dict)
     pull_interval: int = 300  # serve only, seconds; 0 = no polling
     proposals: bool = False  # MCP propose_annotation + HTTP proposals route (GitLab MRs)
-    drift_mr: bool = False  # rolling stub MR on branch ohmydb/drift after each sync
+    drift_mr: bool = False  # rolling MR on ohmydb/drift after each sync: new-table stubs, orphan removals
     # Commit identity of the bot; the drift step also uses its email to tell
     # its own commits from human ones on the drift branch.
     author: str = "ohmydb <ohmydb@noreply.invalid>"

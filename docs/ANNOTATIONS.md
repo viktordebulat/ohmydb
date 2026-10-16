@@ -108,7 +108,7 @@ annotations:
   cluster_paths: {}         # {cluster: root}, falls back to `path` per file
   pull_interval: 300        # serve only, seconds; 0 = no polling
   proposals: false          # MCP propose_annotation + HTTP proposals route
-  drift_mr: false           # stub MR for new tables after each sync
+  drift_mr: false           # MR after each sync: stubs for new tables, removes orphan files
   author: "ohmydb <ohmydb@noreply.invalid>"   # bot commit identity
 ```
 
@@ -297,11 +297,18 @@ not `annotations pull`), from the same clone as the pull:
   force-pushed with a lease. No push when its content didn't change. If the
   branch head was committed by anyone other than `author`, the step is
   skipped, so human edits on it are never overwritten.
-- The MR description lists the new tables, plus orphan files (table gone)
-  and stale columns as FYI. Those are never edited.
+- **Orphan files are deleted**: a table file whose table is gone from every
+  cluster that file serves (shared root: all clusters; override or
+  per-cluster root: that cluster). A file served by a cluster with nothing
+  in the catalog (never synced) is kept, since absence proves nothing there.
+  Files with parse errors and `_database.yaml` files are never deleted. To
+  keep a deleted file, restore it on the drift branch; ohmydb then stops
+  updating the branch until it's merged or deleted.
+- The MR description lists the new tables and removed files, plus stale
+  columns (annotated, no longer in the table) as FYI. Those are never edited.
 
-Existing files are never touched: drift only adds files for new tables. A
-drift failure is reported (`drift=failed ...`) and doesn't undo the pull.
+Other existing files are never touched. A drift failure is reported
+(`drift=failed ...`) and doesn't undo the pull.
 
 ## Annotation repo CI and editors
 

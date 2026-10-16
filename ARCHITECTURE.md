@@ -29,7 +29,8 @@ graph, and serves them over HTTP API and MCP for AI agents.
    `store/repo.py: replace_annotations()`. Triggered after every sync and by
    `serve`'s background poller; reads join it in `store/queries.py`
    (`with_annotations=`). Writes never touch the catalog: with `drift_mr`,
-   `sync_annotations()` pushes stub files for unannotated tables to a
+   `sync_annotations()` pushes stub files for unannotated tables (and
+   deletes files whose table is gone) to a
    rolling `ohmydb/drift` MR (GitLab) / PR (GitHub); with `proposals`, `propose()` (MCP
    tool / HTTP route) merge-patches one table file and opens an MR. A
    human merge lands it, and the next pull picks it up.
