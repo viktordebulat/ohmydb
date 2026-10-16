@@ -91,7 +91,8 @@ adds what introspection can't know: what a table is, grain, units, enum
 values, join keys, deprecations, query gotchas and verified example queries.
 ohmydb pulls it on every sync and polls it while serving. Optionally it
 writes back via merge/pull requests only (GitLab or github.com): agent proposals (`proposals: true`) and
-stub files for new tables (`drift_mr: true`).
+stub files for new tables plus removal of files whose table is gone
+(`drift_mr: true`).
 
 ```yaml
 annotations:

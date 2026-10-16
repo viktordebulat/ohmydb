@@ -212,28 +212,45 @@ def _safe_name(name: str) -> bool:
     return bool(name) and not _BAD_NAME_CHARS.search(name) and name[0] not in "._"
 
 
-def _fyi(cfg: AppConfig, trees: dict[str, Tree], catalog: dict) -> list[str]:
-    """Drift MR description extras: annotation files whose table is gone and
-    annotated columns that no longer exist. Reported only, never edited."""
+def _orphans_and_stale(cfg: AppConfig, trees: dict[str, Tree], catalog: dict) -> tuple[list[str], list[str]]:
+    """Orphans: table files (repo-relative paths) whose table is gone from
+    every cluster the file serves — the drift MR deletes them. A file served
+    by a cluster with nothing in the catalog (never synced) is never an
+    orphan: absence there proves nothing. Stale: FYI lines for annotated
+    columns that no longer exist (reported only, never edited)."""
     a = cfg.annotations
-    lines = []
+    synced = {c for c, _, _ in catalog}
+    orphans, stale_lines = [], []
     for root, tree in trees.items():
         shared = not a.per_cluster and root == _root(a.path)
         served = [c.name for c in cfg.clusters if shared or root == _root(a.root_for(c.name))]
         for (db, name), (doc, path) in sorted(tree.tables.items()):
             hits = [catalog[(c, db, name)] for c in served if catalog.get((c, db, name), ("external",))[0] != "external"]
             if not hits:
-                lines.append(f"orphan file (table not in the catalog): {path}")
+                if served and all(c in synced for c in served):
+                    orphans.append(path)
             elif stale := sorted(set(doc.get("columns", {})) - {col for _, cols in hits for col in cols}):
-                lines.append(f"stale columns in {path}: {', '.join(stale)}")
-    return lines
+                stale_lines.append(f"stale columns in {path}: {', '.join(stale)}")
+    return orphans, stale_lines
+
+
+def _drift_title(stubs: int, removed: int) -> str:
+    def n(count: int, noun: str) -> str:
+        return f"{count} {noun}{'s' if count != 1 else ''}"
+
+    if not removed:
+        return f"ohmydb: annotation stubs for {n(stubs, 'table')}"
+    if not stubs:
+        return f"ohmydb: remove {n(removed, 'orphan annotation file')}"
+    return f"ohmydb: annotation stubs for {n(stubs, 'table')}, remove {n(removed, 'orphan file')}"
 
 
 def _drift(cfg: AppConfig, factory: sessionmaker[Session], workdir: Path, trees: dict[str, Tree]) -> dict:
     """Rolling MR on DRIFT_BRANCH adding stub files for catalog tables that
-    have no annotation file anywhere — new tables only, existing files are
-    never touched. Stubs go to the shared root (per-cluster mode: each
-    cluster's root). Skipped when a human pushed to the branch."""
+    have no annotation file anywhere and deleting files whose table is gone
+    (see _orphans_and_stale); other existing files are never touched. Stubs
+    go to the shared root (per-cluster mode: each cluster's root). Skipped
+    when a human pushed to the branch."""
     a = cfg.annotations
     with factory() as s:
         catalog = catalog_columns(s)
@@ -258,7 +275,8 @@ def _drift(cfg: AppConfig, factory: sessionmaker[Session], workdir: Path, trees:
             continue
         target = a.root_for(cluster) if a.per_cluster else a.path
         stubs.setdefault((target, db, name), (cluster, columns))
-    if not stubs:
+    orphans, stale = _orphans_and_stale(cfg, trees, catalog)
+    if not stubs and not orphans:
         return {"status": "none"}
 
     seen = gitrepo.remote_sha(a.repo, DRIFT_BRANCH, a.token)
@@ -271,21 +289,26 @@ def _drift(cfg: AppConfig, factory: sessionmaker[Session], workdir: Path, trees:
         path = workdir / target / db / f"{name}.yaml"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(render_stub(db, name, columns))
+    for rel in orphans:
+        (workdir / rel).unlink()
     tables = [f"{db}.{name}" + (f" ({cluster})" if a.per_cluster else "") for (_, db, name), (cluster, _) in stubs.items()]
-    gitrepo.commit(workdir, f"annotations: stubs for {len(tables)} new table(s)\n\n" + "\n".join(tables), a.author)
+    counts = {"tables": len(tables), "removed": len(orphans)}
+    gitrepo.commit(workdir, f"annotations: stubs for {len(tables)} new table(s), {len(orphans)} orphan(s) removed\n\n"
+                            + "\n".join([*tables, *(f"removed {rel}" for rel in orphans)]), a.author)
     if seen is not None and gitrepo.rev_parse(workdir, "FETCH_HEAD^{tree}") == gitrepo.rev_parse(workdir, "HEAD^{tree}"):
-        return {"status": "unchanged", "tables": len(tables)}
+        return {"status": "unchanged", **counts}
 
-    fyi = _fyi(cfg, trees, catalog)
     description = "\n".join([
-        "Stub annotation files for tables that have none yet. Fill in what you know, then merge "
-        "(or add the table to `ignore` in _global.yaml).", "",
-        *(f"- {t}" for t in tables),
-        *(["", "FYI, not changed by this MR:", *(f"- {line}" for line in fyi)] if fyi else []),
-    ])
-    title = f"ohmydb: annotation stubs for {len(tables)} table{'s' if len(tables) != 1 else ''}"
-    url = gitrepo.publish(workdir, a.repo, DRIFT_BRANCH, seen or "", a.ref, title, description, a.token)
-    return {"status": "pushed", "tables": len(tables), "merge_request": url}
+        *(["Stub annotation files for tables that have none yet. Fill in what you know, then merge "
+           "(or add the table to `ignore` in _global.yaml).", "", *(f"- {t}" for t in tables), ""] if tables else []),
+        *(["Removed annotation files whose table is no longer in the catalog. To keep one, restore it "
+           "on this branch (ohmydb then stops updating the branch until it's merged or deleted).", "",
+           *(f"- {rel}" for rel in orphans), ""] if orphans else []),
+        *(["FYI, not changed by this MR:", *(f"- {line}" for line in stale)] if stale else []),
+    ]).strip()
+    url = gitrepo.publish(workdir, a.repo, DRIFT_BRANCH, seen or "", a.ref, _drift_title(len(tables), len(orphans)),
+                          description, a.token)
+    return {"status": "pushed", **counts, "merge_request": url}
 
 
 class ProposalError(Exception):

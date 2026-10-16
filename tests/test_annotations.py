@@ -8,7 +8,7 @@ from fastmcp import Client
 
 from app.annotations import gitrepo
 from app.annotations.model import FatalTreeError, dump_rt, load_rt, load_tree, merge_patch, render_stub
-from app.annotations.service import pull, sync_annotations
+from app.annotations.service import _drift_title, pull, sync_annotations
 from app.api import create_app
 from app.config import AnnotationsConfig, AppConfig, ClusterConfig
 from app.core.models import Column, Entity, EntityKind
@@ -348,6 +348,26 @@ def test_drift_per_cluster_stubs(tmp_path, remote):
     assert drift["status"] == "pushed" and drift["tables"] == 3
     files = _git("ls-tree", "-r", "--name-only", "ohmydb/drift", "anno", cwd=remote).split()
     assert files == ["anno/c1/app/events.yaml", "anno/c1/app/users.yaml", "anno/c2/app/events.yaml"]
+
+
+@needs_git
+def test_drift_removes_orphans(tmp_path, remote):
+    url, factory = _catalog(tmp_path)
+    with factory() as s:  # app.users dropped from c1 (c2 never had it)
+        sync_cluster(s, "c1", [Entity(cluster="c1", database="app", name="events", kind=EntityKind.TABLE,
+                                      columns=[Column("ts", "DateTime"), Column("kind", "UInt8")])], [])
+    cfg = _cfg(url, f"file://{remote}", drift_mr=True)
+    cfg.clusters.append(ClusterConfig(name="c3", host="localhost"))  # never synced: proves nothing
+    assert sync_annotations(cfg, factory)["drift"]["status"] == "none"
+
+    cfg.clusters.pop()
+    drift = sync_annotations(cfg, factory)["drift"]
+    assert drift["status"] == "pushed" and drift["tables"] == 0 and drift["removed"] == 1
+    files = _git("ls-tree", "-r", "--name-only", "ohmydb/drift", cwd=remote).split()
+    assert "app/users.yaml" not in files and "app/events.yaml" in files
+    assert _drift_title(0, 1) == "ohmydb: remove 1 orphan annotation file"
+    assert _drift_title(2, 3) == "ohmydb: annotation stubs for 2 tables, remove 3 orphan files"
+    assert _drift_title(1, 0) == "ohmydb: annotation stubs for 1 table"
 
 
 @needs_git

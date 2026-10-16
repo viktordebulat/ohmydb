@@ -301,3 +301,4 @@ Gotchas discovered during implementation. Append after each task, then compact
   before trusting `kill $!`, especially when manually re-verifying a change
   against a live server between edits.
 - **Per-cluster annotation roots must tolerate a missing dir.** With `path: "anno/{cluster}"`, a missing cluster root is a pull *error*, not fatal: a fresh repo (or a newly added cluster) has no dir yet, and drift can only create it if the pull before it succeeds.
+- **Drift orphan deletion needs a "synced" guard.** A table missing from the catalog is only evidence it was dropped if its cluster was synced at all; a configured-but-never-synced cluster has zero catalog rows and would make every file it serves look orphaned. `_orphans_and_stale` keeps any file served by a cluster with no catalog rows.
