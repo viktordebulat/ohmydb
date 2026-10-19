@@ -4,7 +4,6 @@ for changes while serving, and (M24) write back through merge/pull requests
 app/store and never app/adapters."""
 
 import asyncio
-import difflib
 import hashlib
 import logging
 import re
@@ -390,10 +389,7 @@ def propose(cfg: AppConfig, factory: sessionmaker[Session], cluster: str, databa
         rationale = rationale.strip()
         gitrepo.commit(workdir, f"annotations({database}.{name}): {rationale.splitlines()[0]}\n\n"
                                 f"{rationale}\n\nvia {via}", a.author)
-        diff = difflib.unified_diff(current.splitlines(), text.splitlines(), "/dev/null" if not current else rel,
-                                    rel, lineterm="")
-        description = mrtext.proposal_description(cluster, database, name, rel, not current, patch, rationale,
-                                                  list(diff), via)
+        description = mrtext.proposal_description(cluster, database, name, rel, not current, patch, rationale, via)
         url = gitrepo.publish(workdir, a.repo, branch, "", a.ref, f"ohmydb: annotate {database}.{name}", description,
                               a.token, labels=(gitrepo.LABEL, f"{gitrepo.LABEL}::proposal"))
     return {"status": "proposed", "branch": branch, "merge_request": url, "path": rel}

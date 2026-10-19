@@ -347,15 +347,13 @@ def test_drift_description_small_and_huge():
 
 
 def test_proposal_description():
-    diff = ["--- /dev/null", "+++ app/t.yaml", "@@ -0,0 +1 @@", "+description: has ```code```"]
     text = mrtext.proposal_description("c1", "app", "t", "app/t.yaml", True,
                                        {"use_instead": None, "columns": {"ts": {"description": "UTC"}}},
-                                       "Checked\n\nwith a query", diff, "MCP")
+                                       "Checked\n\nwith a query", "MCP")
     assert "`use_instead` (removed), `columns.ts`" in text and "(new file)" in text
-    assert "````diff\n--- /dev/null" in text and "> Checked\n>\n> with a query" in text
-    huge = mrtext.proposal_description("c1", "app", "t", "app/t.yaml", False, {}, "x" * 100_000,
-                                       [f"+line {i} ✨" for i in range(20_000)], "HTTP")
-    assert mrtext.fits(huge) and "diff truncated" in huge and huge.endswith("</sub>")
+    assert "> Checked\n>\n> with a query" in text and "diff" not in text
+    huge = mrtext.proposal_description("c1", "app", "t", "app/t.yaml", False, {}, "x" * 100_000, "HTTP")
+    assert mrtext.fits(huge) and huge.endswith("</sub>")
 
 
 def test_proposals_off_or_unauthorized(tmp_path):

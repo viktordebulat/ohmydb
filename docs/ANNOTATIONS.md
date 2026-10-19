@@ -172,12 +172,12 @@ Nothing changes for readers until a human merges and the next pull runs.
 
 **Descriptions** are Markdown with a summary table, collapsible
 `<details>` sections and a reviewer checklist. Proposals show the
-rationale, the table and cluster, the changed keys and a collapsed diff of
-the file. Drift groups new tables and removed files per database. A
+rationale, the table and cluster, the file and the changed keys (no diff
+preview: the Changes tab has it). Drift groups new tables and removed files per database. A
 description is kept under about 60 KB (one GitLab push option is a single
 git pkt-line, at most 65516 bytes; a GitHub PR body allows 65536 chars). A
 bigger drift first caps each database's list (`… and N more`), then shows
-counts only; a long proposal diff is truncated. The complete change is
+counts only. The complete change is
 always in the MR's Changes tab.
 
 ### Proposals (`proposals: true`)

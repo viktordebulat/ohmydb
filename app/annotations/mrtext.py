@@ -6,7 +6,6 @@ mid-markup. Pure functions: service.py builds the data, gitrepo.py ships
 the result."""
 
 import html
-import re
 from collections import defaultdict
 from pathlib import PurePosixPath
 
@@ -120,17 +119,16 @@ def _changed_keys(patch: dict) -> list[tuple[str, bool]]:
 
 
 def proposal_description(cluster: str, database: str, name: str, rel: str, new_file: bool, patch: dict,
-                         rationale: str, diff: list[str], via: str) -> str:
-    """`diff`: unified diff lines of the annotation file, without line endings."""
+                         rationale: str, via: str) -> str:
+    """No diff preview: the MR's Changes tab already shows it. The capped
+    rationale and changed-key list keep this far below the budget."""
     if len(rationale) > _RATIONALE_MAX:
         rationale = rationale[:_RATIONALE_MAX] + " …"
     keys = _changed_keys(patch)
     shown = ", ".join(f"`{k}`" + (" (removed)" if gone else "") for k, gone in keys[:_KEYS_MAX])
     if len(keys) > _KEYS_MAX:
         shown += f" and {len(keys) - _KEYS_MAX} more"
-    fence = "`" * max(3, 1 + max((len(run) for run in re.findall(r"`+", "\n".join(diff))), default=0))
-
-    head = [
+    return "\n".join([
         f"### 🤖 ohmydb annotation proposal: `{database}.{name}`", "",
         *(f"> {line}" if line else ">" for line in rationale.splitlines()), "",
         "| | |", "|---|---|",
@@ -138,24 +136,9 @@ def proposal_description(cluster: str, database: str, name: str, rel: str, new_f
         f"| 📄 File | `{rel}` ({'new file' if new_file else 'updated'}) |",
         f"| 🔑 Changed keys | {shown or '—'} |",
         f"| 🛰️ Proposed via | {via} |", "",
-        "<details><summary>📝 Change preview</summary>", "", f"{fence}diff",
-    ]
-    tail = [
-        fence, "", "</details>", "",
         "#### ✅ Reviewer checklist", "",
         "- [ ] The rationale is backed by evidence (a query result, docs, the table owner)",
         "- [ ] Column descriptions and `values` match the data",
         "- [ ] Join keys and the `use_instead` target are right", "",
         _FOOTER,
-    ]
-    if fits(text := "\n".join([*head, *diff, *tail])):
-        return text
-    mark = "… diff truncated, see the Changes tab"
-    budget = DESCRIPTION_MAX - description_size("\n".join([*head, mark, *tail])) - 2
-    used, kept = 0, []
-    for line in diff:
-        used += description_size(line) + 2
-        if used > budget:
-            break
-        kept.append(line)
-    return "\n".join([*head, *kept, mark, *tail])
+    ])
