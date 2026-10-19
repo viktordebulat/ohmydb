@@ -23,7 +23,10 @@ from urllib.parse import quote, urlsplit
 
 TIMEOUT = 300  # seconds per git call; a hung remote must not wedge the poller
 LABEL = "ohmydb"  # on every MR/PR ohmydb opens
-DESCRIPTION_MAX = 4000
+# MR/PR description budget in UTF-8 bytes of the "\n"-escaped form (see
+# description_size). GitLab gets it as one push option = one git pkt-line,
+# max 65516 data bytes; a GitHub PR body holds max 65536 chars.
+DESCRIPTION_MAX = 60_000
 
 # stderr fragments git/hosts emit on a rejected or missing credential
 # (GitHub: "could not read Username"; GitLab: "HTTP Basic: Access denied").
@@ -112,30 +115,37 @@ def commit(dest: Path, message: str, author: str) -> str:
     return rev_parse(dest, "HEAD")
 
 
+def description_size(text: str) -> int:
+    """Bytes a description takes on the wire (GitLab push option form)."""
+    return len(text.replace("\n", "\\n").encode())
+
+
 def publish(dest: Path, url: str, branch: str, expect: str, base: str, title: str, description: str,
-            token: str | None = None) -> str | None:
+            token: str | None = None, labels: tuple[str, ...] = (LABEL,)) -> str | None:
     """Push HEAD to `branch` and open a merge/pull request into `base`;
     returns its URL (None if GitLab printed none). --force-with-lease=
     <ref>:<expect>: the branch must still be at `expect` ("" = must not
     exist yet), so a concurrent writer is never clobbered."""
-    description = description.strip().replace("\r", "")[:DESCRIPTION_MAX]
+    description = description.strip().replace("\r", "")
+    while description_size(description) > DESCRIPTION_MAX:  # safety net; mrtext already fits
+        description = description[: len(description) * 9 // 10]
     github = _github_repo(url)
-    opts = [] if github else [arg for o in _gitlab_options(base, title, description) for arg in ("-o", o)]
+    opts = [] if github else [arg for o in _gitlab_options(base, title, description, labels) for arg in ("-o", o)]
     r = _run(["push", *opts, f"--force-with-lease=refs/heads/{branch}:{expect}",
               "origin", f"HEAD:refs/heads/{branch}"], cwd=dest, url=url, token=token)
     if github:
-        return _github_pr(github, token, branch, base, title, description)
+        return _github_pr(github, token, branch, base, title, description, labels)
     return mr_url(r.stderr)
 
 
-def _gitlab_options(base: str, title: str, description: str) -> list[str]:
+def _gitlab_options(base: str, title: str, description: str, labels: tuple[str, ...]) -> list[str]:
     return [
         "merge_request.create",
         f"merge_request.target={base}",
         f"merge_request.title={title}",
         # Push option values can't carry a literal LF; GitLab expands "\n".
         "merge_request.description=" + description.replace("\n", "\\n"),
-        f"merge_request.label={LABEL}",
+        *(f"merge_request.label={label}" for label in labels),
         "merge_request.remove_source_branch",
     ]
 
@@ -163,9 +173,11 @@ def _github_api(method: str, path: str, token: str | None, body: dict | None = N
         raise GitError(f"GitHub API {method} {path.split('?')[0]} failed: HTTP {e.code} {detail}") from None
 
 
-def _github_pr(repo: str, token: str | None, branch: str, base: str, title: str, description: str) -> str:
+def _github_pr(repo: str, token: str | None, branch: str, base: str, title: str, description: str,
+               labels: tuple[str, ...]) -> str:
     """Open a PR for the pushed branch, or reuse the open one (the rolling
-    drift branch keeps its PR across force-pushes). Labeling is best effort."""
+    drift branch keeps its PR across force-pushes) and refresh its title and
+    body. Labeling is best effort."""
     try:
         pr = _github_api("POST", f"/repos/{repo}/pulls", token,
                          {"title": title, "head": branch, "base": base, "body": description})
@@ -177,8 +189,9 @@ def _github_pr(repo: str, token: str | None, branch: str, base: str, title: str,
         if not open_prs:
             raise
         pr = open_prs[0]
+        _github_api("PATCH", f"/repos/{repo}/pulls/{pr['number']}", token, {"title": title, "body": description})
     try:
-        _github_api("POST", f"/repos/{repo}/issues/{pr['number']}/labels", token, {"labels": [LABEL]})
+        _github_api("POST", f"/repos/{repo}/issues/{pr['number']}/labels", token, {"labels": list(labels)})
     except GitError:
         pass
     return pr["html_url"]

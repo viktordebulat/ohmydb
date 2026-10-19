@@ -22,7 +22,7 @@ Gotchas: see [LEARNINGS.md](LEARNINGS.md).
 | Sync trigger | CLI command + POST /sync endpoint (same code path). No scheduler. |
 | Scope | Multi-cluster from day one. Entities namespaced by cluster. |
 | Detail | Structured columns (name/type/comment) + raw DDL + attrs (engine, keys, refreshable). |
-| Annotations | **Decided 2026-10-10.** Repo-backed, flag-gated (`annotations.enabled`, off by default): per-table YAML in a git repo, pulled into the catalog; writes only via GitLab MRs. Shipped as M23/M24; see "Annotation layer decision record" below. 2026-10-15: `path` may hold `{cluster}` for per-cluster roots (no shared root/fallback, writes land per cluster), exclusive with `cluster_paths`. |
+| Annotations | **Decided 2026-10-10.** Repo-backed, flag-gated (`annotations.enabled`, off by default): per-table YAML in a git repo, pulled into the catalog; writes only via GitLab MRs. Shipped as M23/M24; see "Annotation layer decision record" below. 2026-10-15: `path` may hold `{cluster}` for per-cluster roots (no shared root/fallback, writes land per cluster), exclusive with `cluster_paths`. 2026-10-19: MR/PR descriptions are built-in Markdown (summary table, per-database `<details>`, reviewer checklist; proposals list changed keys, no diff preview) kept under a 60 KB budget by capping lists instead of cutting; labels `ohmydb` + `ohmydb::drift`/`ohmydb::proposal`; a reused GitHub PR gets its title/body refreshed. |
 
 ## Shipped (milestones)
 

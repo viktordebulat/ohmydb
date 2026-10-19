@@ -156,18 +156,29 @@ With the flag off, every payload is exactly the pre-feature shape.
 
 Writes never touch the catalog or `ref` directly. Each one is a commit by
 `author` on its own branch, pushed, then opened for review against `ref`
-with label `ohmydb`:
+with labels `ohmydb` plus `ohmydb::proposal` or `ohmydb::drift` (scoped
+labels on GitLab, created on first use; plain names on GitHub):
 
 - **GitLab** (any host that isn't github.com): the push carries
   [push options](https://docs.gitlab.com/user/project/push_options/) that
   open the merge request and remove the source branch on merge. No API call.
 - **GitHub** (`https://github.com/...` only, not GitHub Enterprise): one REST
   call after the push opens the pull request, or reuses the open one for
-  the same branch. Enable *Automatically delete head branches* in the repo
+  the same branch and refreshes its title and description. Enable *Automatically delete head branches* in the repo
   settings to clean up merged branches. Labeling is best effort.
 
 Nothing changes for readers until a human merges and the next pull runs.
 "MR" below means either.
+
+**Descriptions** are Markdown with a summary table, collapsible
+`<details>` sections and a reviewer checklist. Proposals show the
+rationale, the table and cluster, the file and the changed keys (no diff
+preview: the Changes tab has it). Drift groups new tables and removed files per database. A
+description is kept under about 60 KB (one GitLab push option is a single
+git pkt-line, at most 65516 bytes; a GitHub PR body allows 65536 chars). A
+bigger drift first caps each database's list (`… and N more`), then shows
+counts only. The complete change is
+always in the MR's Changes tab.
 
 ### Proposals (`proposals: true`)
 
@@ -304,8 +315,9 @@ not `annotations pull`), from the same clone as the pull:
   Files with parse errors and `_database.yaml` files are never deleted. To
   keep a deleted file, restore it on the drift branch; ohmydb then stops
   updating the branch until it's merged or deleted.
-- The MR description lists the new tables and removed files, plus stale
-  columns (annotated, no longer in the table) as FYI. Those are never edited.
+- The MR description lists the new tables and removed files per database,
+  plus stale columns (annotated, no longer in the table) as FYI. Those are
+  never edited.
 
 Other existing files are never touched. A drift failure is reported
 (`drift=failed ...`) and doesn't undo the pull.
@@ -339,7 +351,7 @@ the enabled features need:
 | GitLab | reads only | Project access token (Settings → Access tokens) | Role **Reporter**, scope **`read_repository`** |
 | GitLab | `proposals` / `drift_mr` | Project access token | Role **Developer**, scope **`write_repository`**. No `api` scope: the push itself opens the MR (push options) |
 | GitHub | reads only | Fine-grained PAT, *Only select repositories* → the annotation repo | **Contents: Read-only** (Metadata: Read-only is added automatically) |
-| GitHub | `proposals` / `drift_mr` | Fine-grained PAT, same repo selection | **Contents: Read and write** + **Pull requests: Read and write**. No Issues permission needed (the `ohmydb` label still applies) |
+| GitHub | `proposals` / `drift_mr` | Fine-grained PAT, same repo selection | **Contents: Read and write** + **Pull requests: Read and write**. No Issues permission needed; labeling is best effort, so if `ohmydb::drift` / `ohmydb::proposal` don't show up, create those labels once in the repo |
 
 - Verified: GitHub reads and writes, private repo, 2026-10-10. GitLab reads
   and writes follow GitLab's docs but haven't been run against a real
