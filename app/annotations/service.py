@@ -4,6 +4,7 @@ for changes while serving, and (M24) write back through merge/pull requests
 app/store and never app/adapters."""
 
 import asyncio
+import difflib
 import hashlib
 import logging
 import re
@@ -19,7 +20,7 @@ from pydantic import ValidationError
 from ruamel.yaml.error import YAMLError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.annotations import gitrepo
+from app.annotations import gitrepo, mrtext
 from app.annotations.model import (
     TableAnnotation,
     Tree,
@@ -212,15 +213,16 @@ def _safe_name(name: str) -> bool:
     return bool(name) and not _BAD_NAME_CHARS.search(name) and name[0] not in "._"
 
 
-def _orphans_and_stale(cfg: AppConfig, trees: dict[str, Tree], catalog: dict) -> tuple[list[str], list[str]]:
+def _orphans_and_stale(cfg: AppConfig, trees: dict[str, Tree],
+                       catalog: dict) -> tuple[list[str], list[tuple[str, list[str]]]]:
     """Orphans: table files (repo-relative paths) whose table is gone from
     every cluster the file serves — the drift MR deletes them. A file served
     by a cluster with nothing in the catalog (never synced) is never an
-    orphan: absence there proves nothing. Stale: FYI lines for annotated
-    columns that no longer exist (reported only, never edited)."""
+    orphan: absence there proves nothing. Stale: (path, columns) for
+    annotated columns that no longer exist (reported only, never edited)."""
     a = cfg.annotations
     synced = {c for c, _, _ in catalog}
-    orphans, stale_lines = [], []
+    orphans, stale_files = [], []
     for root, tree in trees.items():
         shared = not a.per_cluster and root == _root(a.path)
         served = [c.name for c in cfg.clusters if shared or root == _root(a.root_for(c.name))]
@@ -230,8 +232,8 @@ def _orphans_and_stale(cfg: AppConfig, trees: dict[str, Tree], catalog: dict) ->
                 if served and all(c in synced for c in served):
                     orphans.append(path)
             elif stale := sorted(set(doc.get("columns", {})) - {col for _, cols in hits for col in cols}):
-                stale_lines.append(f"stale columns in {path}: {', '.join(stale)}")
-    return orphans, stale_lines
+                stale_files.append((path, stale))
+    return orphans, stale_files
 
 
 def _drift_title(stubs: int, removed: int) -> str:
@@ -298,16 +300,11 @@ def _drift(cfg: AppConfig, factory: sessionmaker[Session], workdir: Path, trees:
     if seen is not None and gitrepo.rev_parse(workdir, "FETCH_HEAD^{tree}") == gitrepo.rev_parse(workdir, "HEAD^{tree}"):
         return {"status": "unchanged", **counts}
 
-    description = "\n".join([
-        *(["Stub annotation files for tables that have none yet. Fill in what you know, then merge "
-           "(or add the table to `ignore` in _global.yaml).", "", *(f"- {t}" for t in tables), ""] if tables else []),
-        *(["Removed annotation files whose table is no longer in the catalog. To keep one, restore it "
-           "on this branch (ohmydb then stops updating the branch until it's merged or deleted).", "",
-           *(f"- {rel}" for rel in orphans), ""] if orphans else []),
-        *(["FYI, not changed by this MR:", *(f"- {line}" for line in stale)] if stale else []),
-    ]).strip()
+    description = mrtext.drift_description(
+        [(db, name, cluster if a.per_cluster else None) for (_, db, name), (cluster, _) in stubs.items()],
+        orphans, stale)
     url = gitrepo.publish(workdir, a.repo, DRIFT_BRANCH, seen or "", a.ref, _drift_title(len(tables), len(orphans)),
-                          description, a.token)
+                          description, a.token, labels=(gitrepo.LABEL, f"{gitrepo.LABEL}::drift"))
     return {"status": "pushed", **counts, "merge_request": url}
 
 
@@ -393,7 +390,10 @@ def propose(cfg: AppConfig, factory: sessionmaker[Session], cluster: str, databa
         rationale = rationale.strip()
         gitrepo.commit(workdir, f"annotations({database}.{name}): {rationale.splitlines()[0]}\n\n"
                                 f"{rationale}\n\nvia {via}", a.author)
-        description = f"{rationale}\n\nProposed via {via} for cluster `{cluster}`."
+        diff = difflib.unified_diff(current.splitlines(), text.splitlines(), "/dev/null" if not current else rel,
+                                    rel, lineterm="")
+        description = mrtext.proposal_description(cluster, database, name, rel, not current, patch, rationale,
+                                                  list(diff), via)
         url = gitrepo.publish(workdir, a.repo, branch, "", a.ref, f"ohmydb: annotate {database}.{name}", description,
-                              a.token)
+                              a.token, labels=(gitrepo.LABEL, f"{gitrepo.LABEL}::proposal"))
     return {"status": "proposed", "branch": branch, "merge_request": url, "path": rel}

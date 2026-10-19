@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from fastmcp import Client
 
-from app.annotations import gitrepo
+from app.annotations import gitrepo, mrtext
 from app.annotations.model import FatalTreeError, dump_rt, load_rt, load_tree, merge_patch, render_stub
 from app.annotations.service import _drift_title, pull, sync_annotations
 from app.api import create_app
@@ -315,12 +315,47 @@ def test_github_pr_reuses_open_pr(monkeypatch):
             raise gitrepo.GitError("GitHub API POST /repos/acme/ann/pulls failed: HTTP 422 already exists")
         if method == "GET":
             return [{"number": 7, "html_url": "https://github.com/acme/ann/pull/7"}]
+        if method == "PATCH":
+            return {}
         raise gitrepo.GitError("HTTP 403 labels")  # labeling is best effort
 
     monkeypatch.setattr(gitrepo, "_github_api", fake_api)
-    assert gitrepo._github_pr("acme/ann", "t", "ohmydb/drift", "main", "title", "body") == \
+    assert gitrepo._github_pr("acme/ann", "t", "ohmydb/drift", "main", "title", "body", ("ohmydb",)) == \
         "https://github.com/acme/ann/pull/7"
     assert calls[1] == ("GET", "/repos/acme/ann/pulls?state=open&head=acme%3Aohmydb/drift")
+    assert calls[2] == ("PATCH", "/repos/acme/ann/pulls/7")  # reused PR gets the fresh title/body
+
+
+def test_gitlab_options_carry_all_labels():
+    opts = gitrepo._gitlab_options("main", "t", "a\nb", ("ohmydb", "ohmydb::drift"))
+    assert "merge_request.description=a\\nb" in opts
+    assert [o for o in opts if o.startswith("merge_request.label=")] == \
+        ["merge_request.label=ohmydb", "merge_request.label=ohmydb::drift"]
+
+
+def test_drift_description_small_and_huge():
+    text = mrtext.drift_description([("app", "events", None), ("app", "users", None)], ["app/old.yaml"],
+                                    [("app/x.yaml", ["gone"])])
+    assert "<details><summary><b>app</b> — 2</summary>\n\n- `app.events`" in text
+    assert "| 🆕 New tables (stubs added) | 2 |" in text and "- `app/old.yaml`" in text
+    assert "- `app/x.yaml`: `gone`" in text and "- [ ] Removed files" in text
+
+    stubs = [(f"db_{i % 30}", f"table_🚀_{i:05}", "prod") for i in range(5000)]
+    text = mrtext.drift_description(stubs, [], [])
+    assert mrtext.fits(text) and "more (see the Changes tab)" in text
+    assert all(f"— {n}</summary>" in text for n in (167, 166))  # every per-db count kept
+
+
+def test_proposal_description():
+    diff = ["--- /dev/null", "+++ app/t.yaml", "@@ -0,0 +1 @@", "+description: has ```code```"]
+    text = mrtext.proposal_description("c1", "app", "t", "app/t.yaml", True,
+                                       {"use_instead": None, "columns": {"ts": {"description": "UTC"}}},
+                                       "Checked\n\nwith a query", diff, "MCP")
+    assert "`use_instead` (removed), `columns.ts`" in text and "(new file)" in text
+    assert "````diff\n--- /dev/null" in text and "> Checked\n>\n> with a query" in text
+    huge = mrtext.proposal_description("c1", "app", "t", "app/t.yaml", False, {}, "x" * 100_000,
+                                       [f"+line {i} ✨" for i in range(20_000)], "HTTP")
+    assert mrtext.fits(huge) and "diff truncated" in huge and huge.endswith("</sub>")
 
 
 def test_proposals_off_or_unauthorized(tmp_path):
