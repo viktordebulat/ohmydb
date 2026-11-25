@@ -29,8 +29,9 @@ graph, and serves them over HTTP API and MCP for AI agents.
    `store/repo.py: replace_annotations()`. Triggered after every sync and by
    `serve`'s background poller; reads join it in `store/queries.py`
    (`with_annotations=`). Writes never touch the catalog: with `drift_mr`,
-   `sync_annotations()` pushes stub files for unannotated tables (and
-   deletes files whose table is gone) to a
+   `sync_annotations()` pushes stub files for unannotated tables, column
+   key adds/removals in existing files (and deletes files whose table is
+   gone) to a
    rolling `ohmydb/drift` MR (GitLab) / PR (GitHub); with `proposals`, `propose()` (MCP
    tool / HTTP route) merge-patches one table file and opens an MR. A
    human merge lands it, and the next pull picks it up.
@@ -42,7 +43,7 @@ graph, and serves them over HTTP API and MCP for AI agents.
 | `app/core` | DB-agnostic model + sync orchestration | `Entity`, `Edge`, `EntityKind`, `EdgeKind`, `run_sync()`, `apply_label_rules()` | `app/adapters`, `app/store` |
 | `app/adapters` | DB-specific introspection; ClickHouse is the only impl | `Introspector` protocol, `build_introspector()`, ClickHouse parsing | `app/core` |
 | `app/store` | Persistence: SQLAlchemy models, upsert logic, read queries, schema migrations | `EntityRow`/`EdgeRow`/`LabelRow`/`AnnotationRow`, `sync_cluster()`, `sync_auto_labels()`, `replace_annotations()`, `graph_payload()`, `list_entities()`, `get_entity()`, `get_relations()`, `catalog_columns()`, `run_migrations()` | `app/core` |
-| `app/annotations` | Repo-backed annotation layer (flag-gated): YAML format + tree loader, round-trip merge patch + drift stubs, git CLI wrapper (the only git/GitLab/GitHub-aware code), pull/poll orchestration, write path (proposal MRs, drift MR), MR/PR Markdown descriptions kept within the host's size limit (`mrtext`). DB-agnostic | `TableAnnotation`, `load_tree()`, `merge_patch()`, `render_stub()`, `gitrepo.clone()/commit()/publish()`, `service.pull()/poll_forever()/sync_annotations()/propose()` | `app/config`, `app/store` |
+| `app/annotations` | Repo-backed annotation layer (flag-gated): YAML format + tree loader, round-trip merge patch + drift stubs/column edits, git CLI wrapper (the only git/GitLab/GitHub-aware code), pull/poll orchestration, write path (proposal MRs, drift MR), MR/PR Markdown descriptions kept within the host's size limit (`mrtext`). DB-agnostic | `TableAnnotation`, `load_tree()`, `merge_patch()`, `render_stub()`, `gitrepo.clone()/commit()/publish()`, `service.pull()/poll_forever()/sync_annotations()/propose()` | `app/config`, `app/store` |
 | `app/migrations` | Alembic migration scripts, shipped inside the package (not repo-root `alembic/`) so they resolve from a non-editable install too | `env.py`, `versions/*.py` | `app/store` |
 | `app/config.py` | Load `config.yaml` → typed config | `load_config()`, `AppConfig` | — |
 | `app/cli.py` | `ohmydb sync\|serve\|mcp\|annotations` entry point | `main()` | `app/config`, `app/core`, `app/api`, `app/mcp`, `app/annotations` |

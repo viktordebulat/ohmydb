@@ -12,7 +12,8 @@ pulls the repo into its catalog and serves it over MCP, the HTTP API and the
 frontend. Everything is off unless `annotations.enabled` is true.
 
 ohmydb can also write back, only through merge/pull requests a human
-reviews: agent proposals and stub files for new tables. See
+reviews: agent proposals, and drift updates after schema syncs (stub files
+for new tables, column keys added/removed, files of dropped tables removed). See
 [Write path](#write-path).
 
 ## Repo layout
@@ -108,7 +109,7 @@ annotations:
   cluster_paths: {}         # {cluster: root}, falls back to `path` per file
   pull_interval: 300        # serve only, seconds; 0 = no polling
   proposals: false          # MCP propose_annotation + HTTP proposals route
-  drift_mr: false           # MR after each sync: stubs for new tables, removes orphan files
+  drift_mr: false           # MR after each sync: stubs for new tables, column add/remove, removes orphan files
   author: "ohmydb <ohmydb@noreply.invalid>"   # bot commit identity
 ```
 
@@ -315,11 +316,21 @@ not `annotations pull`), from the same clone as the pull:
   Files with parse errors and `_database.yaml` files are never deleted. To
   keep a deleted file, restore it on the drift branch; ohmydb then stops
   updating the branch until it's merged or deleted.
-- The MR description lists the new tables and removed files per database,
-  plus stale columns (annotated, no longer in the table) as FYI. Those are
-  never edited.
+- **Column keys follow the table** in existing files (edited round-trip,
+  so comments and every other line stay as they are). Live columns are the
+  union over the clusters the file serves (same rule as orphans, same
+  never-synced guard). A `columns` key whose column is gone from all of them
+  is removed (git history keeps the text); a live column with no key is
+  added as `{description: ""}`, but only to files that already have a
+  `columns` mapping, so table-level-only files stay table-level. Keys of
+  unfilled stub entries count too. A rename shows as one removal plus one
+  addition: move the description by hand. `relationships`, `values` and
+  other fields are never edited, and column types aren't tracked, so a
+  `MODIFY COLUMN` type change alone produces no drift.
+- The MR description lists the new tables, column changes and removed files
+  per database.
 
-Other existing files are never touched. A drift failure is reported
+Nothing else in existing files is touched. A drift failure is reported
 (`drift=failed ...`) and doesn't undo the pull.
 
 ## Annotation repo CI and editors

@@ -21,10 +21,6 @@ def fits(text: str) -> bool:
     return description_size(text) <= DESCRIPTION_MAX
 
 
-def _plural(count: int, noun: str) -> str:
-    return f"{count} {noun}{'s' if count != 1 else ''}"
-
-
 def _details(summary: str, lines: list[str]) -> list[str]:
     # The blank line after <summary> is required, or GitLab/GitHub render
     # the Markdown inside as plain text.
@@ -57,21 +53,28 @@ def _clamp(head: list[str], tail: list[str]) -> str:
 
 
 def drift_description(stubs: list[tuple[str, str, str | None]], removed: list[str],
-                      stale: list[tuple[str, list[str]]]) -> str:
+                      columns: list[tuple[str, list[str], list[str]]]) -> str:
     """`stubs`: (db, table, cluster or None) — cluster only in per-cluster
-    mode. `removed`: repo-relative paths. `stale`: (path, gone columns)."""
+    mode. `removed`: repo-relative paths. `columns`: (path, added, removed
+    column names)."""
     new = defaultdict(list)
     for db, name, cluster in stubs:
         new[db].append(f"- `{db}.{name}`" + (f" ({cluster})" if cluster else ""))
     gone = defaultdict(list)
     for rel in removed:
         gone[PurePosixPath(rel).parent.name].append(f"- `{rel}`")
-    stale_lines = [f"- `{rel}`: " + ", ".join(f"`{c}`" for c in cols) for rel, cols in stale]
+    changed = defaultdict(list)
+    for rel, add, rm in columns:
+        changed[PurePosixPath(rel).parent.name].append(
+            f"- `{rel}`: " + ", ".join([*(f"+`{c}`" for c in add), *(f"−`{c}`" for c in rm)]))
 
     checklist = ["#### ✅ Reviewer checklist", ""]
     if stubs:
         checklist += ["- [ ] Fill in `description` / `grain` where it's worth it (unfilled stubs read as unannotated)",
                       "- [ ] Tables not worth annotating: add them to `ignore` in `_global.yaml`"]
+    if columns:
+        checklist += ["- [ ] New columns (`+`): describe the ones worth it",
+                      "- [ ] A renamed column shows as `−old`, `+new`: move its description over"]
     if removed:
         checklist += ["- [ ] Removed files: restore any table that is coming back (that pauses drift until merged)"]
     tail = [*checklist, "", _FOOTER]  # head always ends with a blank line
@@ -79,26 +82,25 @@ def drift_description(stubs: list[tuple[str, str, str | None]], removed: list[st
     def render(cap: int | None) -> tuple[list[str], list[str]]:
         head = [
             "### 🤖 ohmydb annotation drift", "",
-            "The last schema sync found tables without an annotation file and/or annotation files whose "
-            "table is gone. ohmydb rebuilds branch `ohmydb/drift` after every sync until this is merged; "
+            "The last schema sync found tables without an annotation file, columns added to or dropped from "
+            "annotated tables, and/or annotation files whose table is gone. ohmydb rebuilds branch `ohmydb/drift` after every sync until this is merged; "
             "pushing your own commits to it pauses that.", "",
             "| | |", "|---|---:|",
             f"| 🆕 New tables (stubs added) | {len(stubs)} |",
             f"| 🗑️ Orphan files (removed) | {len(removed)} |",
-            f"| ⚠️ Stale columns (not changed) | {_plural(len(stale), 'file')} |", "",
+            f"| 🔁 Files with column changes | {len(columns)} |", "",
         ]
         if stubs:
             head += ["#### 🆕 New tables", "", *_grouped(new, cap)]
+        if columns:
+            head += ["#### 🔁 Column changes", "",
+                     "`+` added as an empty entry (only in files that already have `columns`), "
+                     "`−` removed: the column is gone from the table.", "",
+                     *_grouped(changed, cap)]
         if removed:
             head += ["#### 🗑️ Removed files", "",
                      "Their table is no longer in the catalog. To keep one, restore it on this branch.", "",
                      *_grouped(gone, cap)]
-        if stale:
-            shown = stale_lines if cap is None else stale_lines[:cap]
-            more = [f"- … and {len(stale) - len(shown)} more"] if len(shown) < len(stale_lines) else []
-            head += ["#### ⚠️ Stale columns", "",
-                     "Annotated columns that no longer exist. Not changed by this MR.", "",
-                     *_details(_plural(len(stale), "file"), [*shown, *more])]
         return head, tail
 
     for cap in _CAPS:

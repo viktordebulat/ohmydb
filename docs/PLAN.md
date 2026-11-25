@@ -414,7 +414,7 @@ service can also open MRs against it. Format, setup and security:
 | Clusters | Shared root `path`; optional `cluster_paths` per cluster, with file-level fallback to the shared root. |
 | Transport | `git` CLI over HTTPS + token (auth header passed via `GIT_CONFIG_*` env, never in URL/argv/disk). Reads work with any git host; writes use GitLab push options (`-o merge_request.create`), so `write_repository` scope suffices, no `api` scope; github.com gets one REST call for the PR (added in M24). No persistent clone. |
 | Refresh | `serve` polls (`git ls-remote` every `pull_interval`, clone only on a new sha); every `sync` also pulls. |
-| Writes | MCP `propose_annotation` + token-gated HTTP proposals route (merge patch, validated against the live catalog, one MR per proposal); rolling `ohmydb/drift` MR after sync adding stub files for unannotated tables and (2026-10-16) deleting orphan files whose table is gone from every cluster the file serves (never-synced clusters protect their files); other files are never edited. The bot can't push to protected `main`. |
+| Writes | MCP `propose_annotation` + token-gated HTTP proposals route (merge patch, validated against the live catalog, one MR per proposal); rolling `ohmydb/drift` MR after sync adding stub files for unannotated tables and (2026-10-16) deleting orphan files whose table is gone from every cluster the file serves (never-synced clusters protect their files); 2026-11-25: existing files get `columns` keys added (only where a `columns` map exists) / removed to follow the table, nothing else in them is edited; column types not tracked. The bot can't push to protected `main`. |
 | MCP auth | Same as M19: no app-level token on MCP; Pomerium + flag + MR review. |
 | Surfacing | `get_table`/GET entity: full annotation + per-column descriptions. Listings: `summary` + `status`, `q` searches summary. `get_schema_graph`: global/database hints. Frontend schema panel. |
 | Tooling | `ohmydb annotations validate DIR` (annotation repo CI), `ohmydb annotations schema` (JSON Schema for editors), sample tree in `seed/annotations/`. |
@@ -476,8 +476,8 @@ this section flagged is tracked in Backlog below.
   external cron/CI trigger being wired up.
 - **Annotation layer follow-ups** (deferred at M23/M24): GitHub Enterprise /
   Gitea PR creation (reads already work there), a CI/webhook-triggered pull endpoint,
-  Ossie export, reverse relationships or a join-path tool, column-level drift
-  edits, ClickHouse table-level `COMMENT` as a fallback summary, sparse
+  Ossie export, reverse relationships or a join-path tool, column type
+  drift (needs a stored baseline), ClickHouse table-level `COMMENT` as a fallback summary, sparse
   checkout for monorepos, annotation outcome in the `/api/sync` response,
   auto-sampled categorical values.
 - **Observability**: structured logging + basic metrics around sync
