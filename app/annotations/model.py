@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, mo
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.error import YAMLError
-from ruamel.yaml.scalarstring import LiteralScalarString
+from ruamel.yaml.scalarstring import DoubleQuotedScalarString, LiteralScalarString
 
 SUMMARY_MAX = 200
 
@@ -279,3 +279,26 @@ def render_stub(database: str, name: str, columns: list[str]) -> str:
         lines.append("columns:")
         lines += [f'  {_key(c)}: {{description: ""}}' for c in columns]
     return "\n".join(lines) + "\n"
+
+
+def column_keys(text: str) -> list[str] | None:
+    """Raw `columns` keys of a table file, None without a `columns` mapping.
+    Not the normalized doc: that prunes `{description: ""}` (stub) entries."""
+    cols = load_rt(text).get("columns")
+    return [str(k) for k in cols] if isinstance(cols, dict) else None
+
+
+def edit_columns(text: str, added: list[str], removed: list[str]) -> str:
+    """Drift column edit, round-trip: drop `removed` keys, append `added` as
+    `{description: ""}` (stub style). Everything else stays as is."""
+    doc = load_rt(text)
+    if not isinstance(doc.get("columns"), dict):
+        doc["columns"] = CommentedMap()
+    cols = doc["columns"]
+    for c in removed:
+        cols.pop(c, None)
+    for c in added:
+        entry = CommentedMap(description=DoubleQuotedScalarString(""))
+        entry.fa.set_flow_style()
+        cols[c] = entry
+    return dump_rt(doc)

@@ -23,7 +23,9 @@ from app.annotations import gitrepo, mrtext
 from app.annotations.model import (
     TableAnnotation,
     Tree,
+    column_keys,
     dump_rt,
+    edit_columns,
     format_errors,
     load_rt,
     load_tree,
@@ -212,44 +214,59 @@ def _safe_name(name: str) -> bool:
     return bool(name) and not _BAD_NAME_CHARS.search(name) and name[0] not in "._"
 
 
-def _orphans_and_stale(cfg: AppConfig, trees: dict[str, Tree],
-                       catalog: dict) -> tuple[list[str], list[tuple[str, list[str]]]]:
+ColumnChange = tuple[str, list[str], list[str]]  # (repo-relative path, added, removed)
+
+
+def _orphans_and_columns(cfg: AppConfig, trees: dict[str, Tree], catalog: dict,
+                         workdir: Path) -> tuple[list[str], list[ColumnChange]]:
     """Orphans: table files (repo-relative paths) whose table is gone from
-    every cluster the file serves — the drift MR deletes them. A file served
-    by a cluster with nothing in the catalog (never synced) is never an
-    orphan: absence there proves nothing. Stale: (path, columns) for
-    annotated columns that no longer exist (reported only, never edited)."""
+    every cluster the file serves — the drift MR deletes them. Column
+    changes: per file, columns in the served clusters that the file lacks
+    (added only if it has a `columns` mapping) and keys of columns gone from
+    all of them (removed). A file served by a cluster with nothing in the
+    catalog (never synced) gets neither: absence there proves nothing.
+    Files with parse errors aren't in the tree, so they're never touched."""
     a = cfg.annotations
     synced = {c for c, _, _ in catalog}
-    orphans, stale_files = [], []
+    orphans, changes = [], []
     for root, tree in trees.items():
         shared = not a.per_cluster and root == _root(a.path)
         served = [c.name for c in cfg.clusters if shared or root == _root(a.root_for(c.name))]
-        for (db, name), (doc, path) in sorted(tree.tables.items()):
+        if not served or not all(c in synced for c in served):
+            continue
+        for (db, name), (_, path) in sorted(tree.tables.items()):
             hits = [catalog[(c, db, name)] for c in served if catalog.get((c, db, name), ("external",))[0] != "external"]
             if not hits:
-                if served and all(c in synced for c in served):
-                    orphans.append(path)
-            elif stale := sorted(set(doc.get("columns", {})) - {col for _, cols in hits for col in cols}):
-                stale_files.append((path, stale))
-    return orphans, stale_files
+                orphans.append(path)
+                continue
+            live = list(dict.fromkeys(col for _, cols in hits for col in cols))
+            keys = column_keys((workdir / path).read_text())
+            removed = [k for k in keys or [] if k not in live]
+            added = [c for c in live if c not in keys] if keys is not None else []
+            if added or removed:
+                changes.append((path, added, removed))
+    return orphans, changes
 
 
-def _drift_title(stubs: int, removed: int) -> str:
+def _drift_title(stubs: int, removed: int, changed: int = 0) -> str:
     def n(count: int, noun: str) -> str:
         return f"{count} {noun}{'s' if count != 1 else ''}"
 
-    if not removed:
-        return f"ohmydb: annotation stubs for {n(stubs, 'table')}"
-    if not stubs:
-        return f"ohmydb: remove {n(removed, 'orphan annotation file')}"
-    return f"ohmydb: annotation stubs for {n(stubs, 'table')}, remove {n(removed, 'orphan file')}"
+    parts = []
+    if stubs:
+        parts.append(f"annotation stubs for {n(stubs, 'table')}")
+    if changed:
+        parts.append(f"{'' if parts else 'annotation '}column updates in {n(changed, 'file')}")
+    if removed:
+        parts.append(f"remove {n(removed, 'orphan file' if parts else 'orphan annotation file')}")
+    return "ohmydb: " + ", ".join(parts)
 
 
 def _drift(cfg: AppConfig, factory: sessionmaker[Session], workdir: Path, trees: dict[str, Tree]) -> dict:
     """Rolling MR on DRIFT_BRANCH adding stub files for catalog tables that
-    have no annotation file anywhere and deleting files whose table is gone
-    (see _orphans_and_stale); other existing files are never touched. Stubs
+    have no annotation file anywhere, deleting files whose table is gone and
+    adding/removing column keys in existing files (see _orphans_and_columns);
+    nothing else in existing files is touched. Stubs
     go to the shared root (per-cluster mode: each cluster's root). Skipped
     when a human pushed to the branch."""
     a = cfg.annotations
@@ -276,8 +293,8 @@ def _drift(cfg: AppConfig, factory: sessionmaker[Session], workdir: Path, trees:
             continue
         target = a.root_for(cluster) if a.per_cluster else a.path
         stubs.setdefault((target, db, name), (cluster, columns))
-    orphans, stale = _orphans_and_stale(cfg, trees, catalog)
-    if not stubs and not orphans:
+    orphans, changes = _orphans_and_columns(cfg, trees, catalog, workdir)
+    if not stubs and not orphans and not changes:
         return {"status": "none"}
 
     seen = gitrepo.remote_sha(a.repo, DRIFT_BRANCH, a.token)
@@ -292,17 +309,24 @@ def _drift(cfg: AppConfig, factory: sessionmaker[Session], workdir: Path, trees:
         path.write_text(render_stub(db, name, columns))
     for rel in orphans:
         (workdir / rel).unlink()
+    for rel, added, removed in changes:
+        path = workdir / rel
+        path.write_text(edit_columns(path.read_text(), added, removed))
     tables = [f"{db}.{name}" + (f" ({cluster})" if a.per_cluster else "") for (_, db, name), (cluster, _) in stubs.items()]
-    counts = {"tables": len(tables), "removed": len(orphans)}
-    gitrepo.commit(workdir, f"annotations: stubs for {len(tables)} new table(s), {len(orphans)} orphan(s) removed\n\n"
-                            + "\n".join([*tables, *(f"removed {rel}" for rel in orphans)]), a.author)
+    counts = {"tables": len(tables), "removed": len(orphans), "columns": len(changes)}
+    column_lines = [f"columns {rel}: " + " ".join([*(f"+{c}" for c in add), *(f"-{c}" for c in rm)])
+                    for rel, add, rm in changes]
+    gitrepo.commit(workdir, f"annotations: stubs for {len(tables)} new table(s), {len(changes)} column update(s), "
+                            f"{len(orphans)} orphan(s) removed\n\n"
+                            + "\n".join([*tables, *column_lines, *(f"removed {rel}" for rel in orphans)]), a.author)
     if seen is not None and gitrepo.rev_parse(workdir, "FETCH_HEAD^{tree}") == gitrepo.rev_parse(workdir, "HEAD^{tree}"):
         return {"status": "unchanged", **counts}
 
     description = mrtext.drift_description(
         [(db, name, cluster if a.per_cluster else None) for (_, db, name), (cluster, _) in stubs.items()],
-        orphans, stale)
-    url = gitrepo.publish(workdir, a.repo, DRIFT_BRANCH, seen or "", a.ref, _drift_title(len(tables), len(orphans)),
+        orphans, changes)
+    url = gitrepo.publish(workdir, a.repo, DRIFT_BRANCH, seen or "", a.ref,
+                          _drift_title(len(tables), len(orphans), len(changes)),
                           description, a.token, labels=(gitrepo.LABEL, f"{gitrepo.LABEL}::drift"))
     return {"status": "pushed", **counts, "merge_request": url}
 

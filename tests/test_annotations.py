@@ -335,10 +335,11 @@ def test_gitlab_options_carry_all_labels():
 
 def test_drift_description_small_and_huge():
     text = mrtext.drift_description([("app", "events", None), ("app", "users", None)], ["app/old.yaml"],
-                                    [("app/x.yaml", ["gone"])])
+                                    [("app/x.yaml", ["new"], ["gone"])])
     assert "<details><summary><b>app</b> — 2</summary>\n\n- `app.events`" in text
     assert "| 🆕 New tables (stubs added) | 2 |" in text and "- `app/old.yaml`" in text
-    assert "- `app/x.yaml`: `gone`" in text and "- [ ] Removed files" in text
+    assert "- `app/x.yaml`: +`new`, −`gone`" in text and "- [ ] Removed files" in text
+    assert "| 🔁 Files with column changes | 1 |" in text
 
     stubs = [(f"db_{i % 30}", f"table_🚀_{i:05}", "prod") for i in range(5000)]
     text = mrtext.drift_description(stubs, [], [])
@@ -401,6 +402,37 @@ def test_drift_removes_orphans(tmp_path, remote):
     assert _drift_title(0, 1) == "ohmydb: remove 1 orphan annotation file"
     assert _drift_title(2, 3) == "ohmydb: annotation stubs for 2 tables, remove 3 orphan files"
     assert _drift_title(1, 0) == "ohmydb: annotation stubs for 1 table"
+    assert _drift_title(0, 0, 2) == "ohmydb: annotation column updates in 2 files"
+    assert _drift_title(1, 1, 1) == "ohmydb: annotation stubs for 1 table, column updates in 1 file, remove 1 orphan file"
+
+
+@needs_git
+def test_drift_column_changes(tmp_path, remote):
+    url, factory = _catalog(tmp_path)
+    with factory() as s:  # c1: app.events gains new_col; app.users id -> uid; app.notes has no columns map
+        sync_cluster(s, "c1", [
+            Entity(cluster="c1", database="app", name="events", kind=EntityKind.TABLE,
+                   columns=[Column("ts", "DateTime"), Column("kind", "UInt8"), Column("new_col", "String")]),
+            Entity(cluster="c1", database="app", name="users", kind=EntityKind.TABLE, columns=[Column("uid", "UInt64")]),
+            Entity(cluster="c1", database="app", name="notes", kind=EntityKind.TABLE, columns=[Column("x", "String")]),
+        ], [])
+    work = tmp_path / "seed"
+    _git("clone", "--quiet", f"file://{remote}", str(work))
+    (work / "app/notes.yaml").write_text("description: Notes  # table-level only\n")
+    _git("add", ".", cwd=work)
+    _git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "notes", cwd=work)
+    _git("push", "--quiet", "origin", "main", cwd=work)
+    cfg = _cfg(url, f"file://{remote}", drift_mr=True)
+
+    drift = sync_annotations(cfg, factory)["drift"]
+    assert drift["status"] == "pushed" and drift == {**drift, "tables": 0, "removed": 0, "columns": 2}
+    events = _git("show", "ohmydb/drift:app/events.yaml", cwd=remote)
+    assert 'new_col: {description: ""}' in events and "gone" not in events
+    assert events.startswith(EVENTS.split("  gone")[0])  # untouched lines stay byte-identical
+    users = _git("show", "ohmydb/drift:app/users.yaml", cwd=remote)
+    assert users == 'description: ""\ncolumns:\n  uid: {description: ""}\n'  # stub columns count too
+    assert _git("show", "ohmydb/drift:app/notes.yaml", cwd=remote) == "description: Notes  # table-level only\n"
+    assert sync_annotations(cfg, factory)["drift"]["status"] == "unchanged"
 
 
 @needs_git
