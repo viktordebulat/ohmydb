@@ -247,7 +247,9 @@ Gotchas discovered during implementation. Append after each task, then compact
   (`uv run playwright install chromium`, auto-skips otherwise) with a
   `live_server` fixture already wired to a seeded sqlite catalog. An ad hoc
   `npm install playwright` + hand-rolled script in a scratch dir duplicates
-  it instead of extending it.
+  it instead of extending it. Every `playwright` version bump needs the
+  install re-run (browser builds are version-pinned), or the UI tests
+  silently skip — check `-rs` after dependency bumps.
 - mind-elixir's constructor sets `style.position = "relative"` inline on
   whatever element you pass as `el`, unconditionally. An inline style beats
   any stylesheet rule regardless of specificity, so `#mindmap { position:
